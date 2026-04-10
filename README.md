@@ -49,8 +49,8 @@ EvilTwin relies on several backend keys to power its external API checks and dat
 First, clone the repository and set up your environment variables:
 
 ```bash
-git clone https://github.com/your-org/eviltwin.git
-cd eviltwin
+git clone https://github.com/Janaashraf992/EvilTwin.git
+cd EvilTwin
 cp .env.example .env
 ```
 
