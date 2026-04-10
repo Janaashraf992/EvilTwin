@@ -1,0 +1,43 @@
+:root {
+  --ifm-color-primary: #0b6e99;
+  --ifm-color-primary-dark: #0a638a;
+  --ifm-color-primary-darker: #095d81;
+  --ifm-color-primary-darkest: #074d6a;
+  --ifm-color-primary-light: #0c79a8;
+  --ifm-color-primary-lighter: #0d7fb1;
+  --ifm-color-primary-lightest: #118fc7;
+  --ifm-code-font-size: 95%;
+}
+
+.heroBanner {
+  background: linear-gradient(120deg, #0f172a 0%, #0b6e99 55%, #164e63 100%);
+}
+
+.ctaRow {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1.25rem;
+}
+
+.gridCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.docCard {
+  border: 1px solid var(--ifm-toc-border-color);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: var(--ifm-card-background-color);
+}
+
+.docCard h2 {
+  margin-bottom: 0.5rem;
+  font-size: 1.15rem;
+}
+
+.docCard p {
+  margin-bottom: 0.75rem;
+}

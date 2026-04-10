@@ -1,0 +1,78 @@
+<dashboard>
+  <label>EvilTwin Overview</label>
+  <description>Real-time cyber deception platform metrics</description>
+
+  <!-- ================================================================== -->
+  <!-- Row 1: Attack count over time                                      -->
+  <!-- ================================================================== -->
+  <row>
+    <panel>
+      <title>Attack Count Over Time</title>
+      <chart>
+        <search>
+          <query>index=eviltwin sourcetype=cowrie:json | timechart span=1h count</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.chart.showDataLabels">none</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Events</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ================================================================== -->
+  <!-- Row 2: Top 10 attacker commands (table)                            -->
+  <!-- ================================================================== -->
+  <row>
+    <panel>
+      <title>Top 10 Attacker Commands</title>
+      <table>
+        <search>
+          <query>index=eviltwin sourcetype=cowrie:json eventid="cowrie.command.input" | top limit=10 input</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">10</option>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+
+  <!-- ================================================================== -->
+  <!-- Row 3: Threat level distribution (pie chart)                       -->
+  <!-- ================================================================== -->
+  <row>
+    <panel>
+      <title>Threat Level Distribution</title>
+      <chart>
+        <search>
+          <query>index=eviltwin sourcetype=cowrie:json | eval threat=case(threat_level==0,"Unknown",threat_level==1,"Low",threat_level==2,"Medium",threat_level==3,"High",threat_level==4,"Critical",1==1,"Unknown") | stats count by threat</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+      </chart>
+    </panel>
+  </row>
+
+  <!-- ================================================================== -->
+  <!-- Row 4: Critical alerts table                                       -->
+  <!-- ================================================================== -->
+  <row>
+    <panel>
+      <title>Critical Alerts</title>
+      <table>
+        <search>
+          <query>index=eviltwin sourcetype=cowrie:json threat_level>=3 | table _time src_ip country input eventid | sort -_time</query>
+          <earliest>-24h@h</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">row</option>
+      </table>
+    </panel>
+  </row>
+
+</dashboard>

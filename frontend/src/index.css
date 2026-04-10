@@ -1,0 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-base font-body text-text-primary antialiased;
+    min-height: 100vh;
+    background: radial-gradient(circle at top right, rgba(20, 25, 40, 1) 0%, rgba(10, 14, 26, 1) 100%);
+    background-attachment: fixed;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-base;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-700/50 hover:bg-slate-500/80 transition-colors;
+  }
+
+  ::selection {
+    @apply bg-threat/30 text-white;
+  }
+}
+
+@layer components {
+  /* Premium Glassmorphism base container */
+  .glass {
+    @apply bg-surface/50 border border-border/50 backdrop-blur-md shadow-panel transition-all duration-300;
+  }
+
+  /* Deeper elevation for popups and tooltips */
+  .glass-elevated {
+    @apply bg-elevated/70 border border-white/10 backdrop-blur-xl shadow-glow transition-all duration-300;
+  }
+
+  .mono {
+    @apply font-display text-sm tracking-tight;
+  }
+
+  .stat-value {
+    @apply font-display text-3xl font-semibold tabular-nums tracking-tighter;
+  }
+
+  /* Technical animated grid baseline */
+  .grid-line {
+    background-image:
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    background-position: center center;
+  }
+
+  /* Improved Threat Color coding with gradient text-clips and rich borders */
+  .threat-critical { @apply bg-threat/10 text-threat border-threat/40 shadow-[0_0_15px_rgba(230,57,70,0.15)]; }
+  .threat-high { @apply bg-orange-500/10 text-orange-400 border-orange-500/40 shadow-[0_0_15px_rgba(249,115,22,0.15)]; }
+  .threat-medium { @apply bg-warning/10 text-warning border-warning/40 shadow-[0_0_15px_rgba(244,162,97,0.15)]; }
+  .threat-low { @apply bg-safe/10 text-safe border-safe/40 shadow-[0_0_15px_rgba(46,196,182,0.15)]; }
+  .threat-unknown { @apply bg-text-muted/10 text-text-muted border-text-muted/40; }
+}

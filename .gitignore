@@ -1,0 +1,155 @@
+# =========================
+# System Files
+# =========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.tmp
+*.bak
+*.swp
+*~.nib
+
+# =========================
+# Python / Backend
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+celerybeat-schedule
+celerybeat.pid
+
+# =========================
+# Node / Frontend
+# =========================
+node_modules/
+dist/
+build/
+.cache/
+.parcel-cache/
+.next/
+out/
+.nuxt/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.docusaurus/
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+docs-site/my_build_output.txt
+
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+*.pem
+*.key
+*.cert
+*.crt
+# EXCEPTION: keep the example template
+!.env.example
+
+# =========================
+# Infrastructure / Terraform
+# =========================
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# =========================
+# Docker & Volumes
+# =========================
+*.log
+docker-compose.override.yml
+# Malware Captures & Honeypot Logs
+cowrie-logs/
+cowrie-downloads/
+dionaea-logs/
+dionaea-captures/
+pgdata/
+
+# =========================
+# ML Models & Data
+# =========================
+backend/ai/model.pkl
+*.pkl
+*.h5
+*.onnx
+*.weights
+*.pt
+
+# =========================
+# Database & SQL
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.sql
+*.sql.gz
+
+# =========================
+# IDEs & Workspaces
+# =========================
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.sublime-project
+*.sublime-workspace
+.kiro/
