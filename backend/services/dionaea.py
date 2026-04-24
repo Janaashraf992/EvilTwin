@@ -116,6 +116,12 @@ def _parse_ftp_command_events(base_payload: dict[str, Any], raw_event: dict[str,
     if not isinstance(commands, list):
         return []
 
+    has_explicit_credentials = any(
+        isinstance(entry, dict)
+        and ((entry.get("username") is not None) or (entry.get("password") is not None))
+        for entry in (raw_event.get("credentials") or [])
+    )
+
     payloads: list[LogIngestRequest] = []
     for command_entry in commands:
         if not isinstance(command_entry, dict):
@@ -128,8 +134,16 @@ def _parse_ftp_command_events(base_payload: dict[str, Any], raw_event: dict[str,
 
         input_text = " ".join([command, *arguments]).strip()
         upper_command = command.upper()
-        username = arguments[0] if upper_command == "USER" and arguments else None
-        password = arguments[0] if upper_command == "PASS" and arguments else None
+        username = (
+            arguments[0]
+            if (not has_explicit_credentials and upper_command == "USER" and arguments)
+            else None
+        )
+        password = (
+            arguments[0]
+            if (not has_explicit_credentials and upper_command == "PASS" and arguments)
+            else None
+        )
 
         payloads.append(
             LogIngestRequest.model_validate(
@@ -140,6 +154,40 @@ def _parse_ftp_command_events(base_payload: dict[str, Any], raw_event: dict[str,
                     "input": input_text,
                     "username": username,
                     "password": password,
+                }
+            )
+        )
+
+    return payloads
+
+
+def _parse_credential_events(base_payload: dict[str, Any], raw_event: dict[str, Any]) -> list[LogIngestRequest]:
+    credentials = raw_event.get("credentials")
+    if not isinstance(credentials, list):
+        return []
+
+    protocol = str(base_payload["protocol"])
+    payloads: list[LogIngestRequest] = []
+    for credential_entry in credentials:
+        if not isinstance(credential_entry, dict):
+            continue
+
+        username_value = credential_entry.get("username")
+        password_value = credential_entry.get("password")
+        username = str(username_value).strip() if username_value is not None else None
+        password = str(password_value).strip() if password_value is not None else None
+
+        if not username and not password:
+            continue
+
+        payloads.append(
+            LogIngestRequest.model_validate(
+                {
+                    **base_payload,
+                    "eventid": f"dionaea.modules.python.{protocol}.login",
+                    "message": f"{protocol.upper()} credential attempt observed by Dionaea",
+                    "username": username or None,
+                    "password": password or None,
                 }
             )
         )
@@ -167,6 +215,7 @@ def parse_dionaea_event(raw_event: dict[str, Any], honeypot_ip: str) -> list[Log
         )
     ]
     payloads.extend(_parse_ftp_command_events(base_payload, raw_event))
+    payloads.extend(_parse_credential_events(base_payload, raw_event))
     return payloads
 
 

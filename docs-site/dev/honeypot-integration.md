@@ -97,6 +97,7 @@ Event types:
 | `cowrie.session.file_download` | Cowrie | Payload retrieval attempt |
 | `dionaea.connection.tcp.accept` | Dionaea | Accepted HTTP/FTP/SMB/MSSQL connection |
 | `dionaea.modules.python.ftp.command` | Dionaea | FTP command captured from the client |
+| `dionaea.modules.python.ftp.login` | Dionaea | Combined FTP credential attempt captured from the client |
 
 ---
 
@@ -142,7 +143,7 @@ The tailer also accepts epoch timestamps from Cowrie and converts them into UTC 
 
 ### Pattern C — Backend-side Dionaea JSON Tailer
 
-Dionaea writes structured JSON incidents to `/logs/dionaea/dionaea.json`, and the backend tails that file directly. Each JSON line is normalized into one or more `LogIngestRequest` payloads. Connection incidents become `dionaea.connection.tcp.accept` events, and nested FTP command arrays become `dionaea.modules.python.ftp.command` follow-up events that append to the same session.
+Dionaea writes structured JSON incidents to `/logs/dionaea/dionaea.json`, and the backend tails that file directly. Each JSON line is normalized into one or more `LogIngestRequest` payloads. Connection incidents become `dionaea.connection.tcp.accept` events, nested FTP command arrays become `dionaea.modules.python.ftp.command` follow-up events, and Dionaea's combined `credentials` array becomes `dionaea.modules.python.ftp.login` follow-up events so the backend records a single username/password pair instead of split partial entries.
 
 ### Pattern D — Canary Token Webhook
 

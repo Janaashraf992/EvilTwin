@@ -158,6 +158,5 @@ async def test_dionaea_ftp_event_creates_single_session_with_commands(
         "QUIT",
     ]
     assert session["credentials_tried"] == [
-        {"username": "anonymous", "password": "", "success": False},
-        {"username": "", "password": "demo@example.com", "success": False},
+        {"username": "anonymous", "password": "demo@example.com", "success": False},
     ]
