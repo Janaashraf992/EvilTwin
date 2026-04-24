@@ -52,6 +52,17 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     DEBUG: bool = False
 
+    DEMO_BOOTSTRAP: bool = False
+    DEMO_USER_EMAIL: Optional[str] = None
+    DEMO_USER_PASSWORD: Optional[str] = None
+    DEMO_USER_ROLE: str = "analyst"
+
+    COWRIE_TAIL_ENABLED: bool = True
+    COWRIE_LOG_PATH: str = "/logs/cowrie/cowrie.json"
+    DIONAEA_TAIL_ENABLED: bool = True
+    DIONAEA_LOG_PATH: str = "/logs/dionaea/dionaea.json"
+    HONEYPOT_LOG_POLL_INTERVAL_SECONDS: float = 1.0
+
     @property
     def database_url(self) -> str:
         return (

@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -9,6 +10,8 @@ from config import get_settings
 from database import close_db, get_db_context, init_db
 from routers import alerts, canary, dashboard, health, ingest, scoring, sessions, auth
 from routers import ai as ai_router
+from services.cowrie import watch_cowrie_log
+from services.dionaea import watch_dionaea_log
 from state import app_state
 
 
@@ -17,6 +20,7 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     init_db(settings.database_url)
     app_state.started_at = datetime.now(timezone.utc)
+    background_tasks: list[asyncio.Task[None]] = []
 
     # Services initialize lazily, but model loading is attempted on startup.
     from services.threat_scorer import ThreatScorer
@@ -44,9 +48,36 @@ async def lifespan(_: FastAPI):
     async with get_db_context() as db:
         await db.execute(text("SELECT 1"))
 
+    if settings.COWRIE_TAIL_ENABLED:
+        background_tasks.append(
+            asyncio.create_task(
+                watch_cowrie_log(
+                    settings.COWRIE_LOG_PATH,
+                    settings.HONEYPOT_IP,
+                    poll_interval_seconds=settings.HONEYPOT_LOG_POLL_INTERVAL_SECONDS,
+                )
+            )
+        )
+
+    if settings.DIONAEA_TAIL_ENABLED:
+        background_tasks.append(
+            asyncio.create_task(
+                watch_dionaea_log(
+                    settings.DIONAEA_LOG_PATH,
+                    settings.HONEYPOT_IP,
+                    poll_interval_seconds=settings.HONEYPOT_LOG_POLL_INTERVAL_SECONDS,
+                )
+            )
+        )
+
     try:
         yield
     finally:
+        for task in background_tasks:
+            task.cancel()
+        if background_tasks:
+            await asyncio.gather(*background_tasks, return_exceptions=True)
+
         if app_state.vpn_detector is not None:
             await app_state.vpn_detector.close()
             app_state.vpn_detector = None

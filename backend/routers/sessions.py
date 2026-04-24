@@ -81,6 +81,8 @@ async def list_sessions(
             country=profile.country,
             city=profile.city,
             isp=profile.isp,
+            latitude=profile.latitude,
+            longitude=profile.longitude,
             vpn_detected=profile.vpn_detected,
         )
         for session, profile in rows
@@ -120,5 +122,7 @@ async def get_session(
         country=profile.country,
         city=profile.city,
         isp=profile.isp,
+        latitude=profile.latitude,
+        longitude=profile.longitude,
         vpn_detected=profile.vpn_detected,
     )

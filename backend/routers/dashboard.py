@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
@@ -19,7 +19,7 @@ async def get_stats(
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ) -> StatsResponse:
-    since = datetime.utcnow() - timedelta(hours=24)
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
 
     total_sessions_24h = (
         await db.execute(select(func.count(SessionLog.id)).where(SessionLog.start_time >= since))
@@ -77,7 +77,7 @@ async def get_timeline(
     _current_user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Return attack counts per hour for the last 24 hours."""
-    since = datetime.utcnow() - timedelta(hours=24)
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
     sessions = (
         await db.execute(
             select(SessionLog.start_time)
@@ -98,7 +98,7 @@ async def get_top_attackers(
     _current_user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Return top 10 attackers by session count in the last 24 hours."""
-    since = datetime.utcnow() - timedelta(hours=24)
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
 
     from models import AttackerProfile
 

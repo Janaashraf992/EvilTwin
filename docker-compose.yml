@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   # ============================================================================
   # PostgreSQL Database
@@ -38,6 +36,7 @@ services:
       - cowrie-downloads:/cowrie/var/lib/cowrie/downloads
     networks:
       - deception-net
+      - honeypot-ingress
     ports:
       - "2222:22"
     restart: unless-stopped
@@ -55,10 +54,12 @@ services:
       - dionaea-captures:/opt/dionaea/var/lib/dionaea/binaries
     networks:
       - deception-net
+      - honeypot-ingress
     ports:
-      - "21:21"
-      - "80:80"
-      - "445:445"
+      - "${DIONAEA_FTP_PORT:-2121}:21"
+      - "${DIONAEA_HTTP_PORT:-8081}:80"
+      - "${DIONAEA_SMB_PORT:-1445}:445"
+      - "${DIONAEA_MSSQL_PORT:-11433}:1433"
     restart: unless-stopped
 
   # ============================================================================
@@ -107,11 +108,20 @@ services:
       SPLUNK_HEC_URL: ${SPLUNK_HEC_URL:-}
       SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:-}
       CANARY_WEBHOOK_SECRET: ${CANARY_WEBHOOK_SECRET:?CANARY_WEBHOOK_SECRET is required}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      DEMO_BOOTSTRAP: ${DEMO_BOOTSTRAP:-true}
+      DEMO_USER_EMAIL: ${DEMO_USER_EMAIL:-analyst@eviltwin.local}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-eviltwin-demo}
+      DEMO_USER_ROLE: ${DEMO_USER_ROLE:-analyst}
     volumes:
       - cowrie-logs:/logs/cowrie:ro
       - dionaea-logs:/logs/dionaea:ro
     networks:
       - eviltwin-net
+      - deception-net
     ports:
       - "8000:8000"
     healthcheck:
@@ -153,6 +163,7 @@ services:
     container_name: eviltwin-splunk-fwd
     environment:
       SPLUNK_START_ARGS: "--accept-license"
+      SPLUNK_GENERAL_TERMS: "--accept-sgt-current-at-splunk-com"
       SPLUNK_PASSWORD: ${SPLUNK_HEC_TOKEN:-changeme123}
     volumes:
       - cowrie-logs:/cowrie/var/log/cowrie:ro
@@ -169,6 +180,10 @@ networks:
   eviltwin-net:
     driver: bridge
     name: eviltwin-net
+
+  honeypot-ingress:
+    driver: bridge
+    name: eviltwin-honeypot-ingress
 
   deception-net:
     driver: bridge

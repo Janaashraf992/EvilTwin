@@ -4,8 +4,12 @@ SQLAlchemy ORM models for EvilTwin platform.
 from sqlalchemy import Column, String, Boolean, Float, Integer, DateTime, ARRAY, ForeignKey
 from sqlalchemy.dialects.postgresql import INET, UUID, JSONB
 from sqlalchemy.orm import declarative_base, relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 Base = declarative_base()
 
@@ -21,8 +25,8 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     role = Column(String(20), nullable=False, default="analyst")  # admin, analyst, viewer
 
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
 
     def __repr__(self):
         return f"<User(id={self.id}, email='{self.email}', is_active={self.is_active})>"
@@ -54,8 +58,8 @@ class AttackerProfile(Base):
     threat_level = Column(Integer, default=0, nullable=False)  # 0=unknown, 1=low, 2=medium, 3=high, 4=critical
     
     # Temporal tracking
-    first_seen = Column(DateTime, nullable=False, default=datetime.utcnow)
-    last_seen = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    first_seen = Column(DateTime, nullable=False, default=_utcnow)
+    last_seen = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
     
     # Session tracking
     total_sessions = Column(Integer, default=0, nullable=False)
@@ -89,7 +93,7 @@ class SessionLog(Base):
     protocol = Column(String(20), nullable=False)  # 'ssh', 'http', 'ftp', etc.
     
     # Temporal data
-    start_time = Column(DateTime, nullable=False, default=datetime.utcnow)
+    start_time = Column(DateTime, nullable=False, default=_utcnow)
     end_time = Column(DateTime, nullable=True)
     
     # Behavioral data (JSONB for flexible structure)
@@ -129,7 +133,7 @@ class Alert(Base):
     message = Column(String, nullable=False)
     
     # Temporal tracking
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
     
     # Acknowledgment fields
     acknowledged = Column(Boolean, default=False, nullable=False)

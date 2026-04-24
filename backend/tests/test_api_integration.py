@@ -1,7 +1,12 @@
 import uuid
+import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import pytest
+
+from models import AttackerProfile, SessionLog
+from services.dionaea import process_dionaea_log_line
 
 
 @pytest.mark.asyncio
@@ -61,3 +66,98 @@ async def test_sessions_detail_not_found(integration_client):
     missing_id = str(uuid.uuid4())
     response = await integration_client.get(f"/sessions/{missing_id}")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_sessions_include_geo_fields(integration_client, integration_db_session):
+    profile = AttackerProfile(
+        ip="203.0.113.222",
+        country="US",
+        city="Seattle",
+        isp="Example ISP",
+        latitude=47.6062,
+        longitude=-122.3321,
+        threat_score=0.7,
+        threat_level=3,
+        vpn_detected=True,
+    )
+    session = SessionLog(
+        id=uuid.uuid4(),
+        attacker_ip="203.0.113.222",
+        honeypot="cowrie",
+        protocol="ssh",
+        start_time=datetime.now(timezone.utc).replace(tzinfo=None),
+        end_time=datetime.now(timezone.utc).replace(tzinfo=None),
+        commands=[],
+        credentials_tried=[],
+        malware_hashes=[],
+        raw_log={"events": []},
+    )
+    integration_db_session.add(profile)
+    integration_db_session.add(session)
+    await integration_db_session.commit()
+
+    response = await integration_client.get("/sessions", params={"ip": "203.0.113.222"})
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["latitude"] == pytest.approx(47.6062)
+    assert item["longitude"] == pytest.approx(-122.3321)
+
+
+@pytest.mark.asyncio
+async def test_dionaea_ftp_event_creates_single_session_with_commands(
+    integration_client,
+    integration_db_session,
+):
+    @asynccontextmanager
+    async def fake_db_factory():
+        yield integration_db_session
+
+    processed = await process_dionaea_log_line(
+        json.dumps(
+            {
+                "connection": {"protocol": "ftpd", "transport": "tcp", "type": "accept"},
+                "dst_ip": "172.21.0.2",
+                "dst_port": 21,
+                "src_hostname": "",
+                "src_ip": "172.21.0.1",
+                "src_port": 37370,
+                "timestamp": "2026-04-24T17:56:39.389701",
+                "ftp": {
+                    "commands": [
+                        {"command": "USER", "arguments": ["anonymous"]},
+                        {"command": "PASS", "arguments": ["demo@example.com"]},
+                        {"command": "QUIT", "arguments": []},
+                    ]
+                },
+                "credentials": [{"username": "anonymous", "password": "demo@example.com"}],
+            }
+        ),
+        honeypot_ip="10.0.2.10",
+        db_factory=fake_db_factory,
+    )
+
+    assert processed is True
+    await integration_db_session.commit()
+
+    response = await integration_client.get(
+        "/sessions",
+        params={"page": 1, "page_size": 10, "honeypot": "dionaea", "ip": "172.21.0.1"},
+    )
+    assert response.status_code == 200
+
+    items = response.json()["items"]
+    assert len(items) == 1
+
+    session = items[0]
+    assert session["honeypot"] == "dionaea"
+    assert session["protocol"] == "ftp"
+    assert [entry["command"] for entry in session["commands"]] == [
+        "USER anonymous",
+        "PASS demo@example.com",
+        "QUIT",
+    ]
+    assert session["credentials_tried"] == [
+        {"username": "anonymous", "password": "", "success": False},
+        {"username": "", "password": "demo@example.com", "success": False},
+    ]

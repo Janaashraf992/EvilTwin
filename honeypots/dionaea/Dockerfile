@@ -1,15 +1,14 @@
 FROM dinotools/dionaea:latest
 
-USER root
+# Override the template cfg so init_etc copies our version on first start
+COPY dionaea.cfg /opt/dionaea/template/etc/dionaea/dionaea.cfg
+COPY log_json.yaml /opt/dionaea/template/etc/dionaea/ihandlers-enabled/log_json.yaml
 
-COPY dionaea.cfg /opt/dionaea/etc/dionaea/dionaea.cfg
-
-RUN mkdir -p /opt/dionaea/var/log \
-             /opt/dionaea/var/lib/dionaea/binaries \
-    && chown -R nobody:nogroup /opt/dionaea/var
-
-USER nobody
+# Pre-create var/lib directory structure from template.
+# When docker-compose mounts a named volume at var/lib/dionaea/binaries,
+# Docker creates the parent var/lib/dionaea/, causing the entrypoint to skip
+# init_lib. Without this RUN, required subdirs (ftp, http, sip, etc.) are
+# missing and dionaea segfaults. Building them into the image avoids that.
+RUN cd /opt/dionaea && cp -a template/lib var/ && chown -R dionaea:dionaea var/lib
 
 EXPOSE 21 80 445 1433
-
-CMD ["dionaea", "-c", "/opt/dionaea/etc/dionaea/dionaea.cfg", "-l", "all,-debug", "-L", "*"]

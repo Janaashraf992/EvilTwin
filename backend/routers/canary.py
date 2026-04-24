@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,7 +39,7 @@ async def ingest_canary(
     ip = str(payload.src_ip)
     profile = await db.get(AttackerProfile, ip)
     if profile is None:
-        profile = AttackerProfile(ip=ip, first_seen=datetime.utcnow(), last_seen=datetime.utcnow(), total_sessions=1)
+        profile = AttackerProfile(ip=ip, first_seen=datetime.now(timezone.utc).replace(tzinfo=None), last_seen=datetime.now(timezone.utc).replace(tzinfo=None), total_sessions=1)
         db.add(profile)
 
     session = SessionLog(
@@ -73,7 +73,7 @@ async def ingest_canary(
             "attacker_ip": ip,
             "threat_level": alert.threat_level,
             "message": alert.message,
-            "created_at": alert.created_at.isoformat() if alert.created_at else datetime.utcnow().isoformat(),
+            "created_at": alert.created_at.isoformat() if alert.created_at else datetime.now(timezone.utc).isoformat(),
             "acknowledged": False,
         }
     )

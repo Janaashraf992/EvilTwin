@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
@@ -15,6 +16,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 os.environ.setdefault("POSTGRES_PASSWORD", "testpass")
 os.environ.setdefault("CANARY_WEBHOOK_SECRET", "testsecret")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-tests-only")
 
 
 @pytest_asyncio.fixture
@@ -46,8 +48,10 @@ async def integration_db_session():
 
 @pytest_asyncio.fixture
 async def integration_client(integration_db_session: AsyncSession):
+    from deps import get_current_user
     from database import get_db
     from main import app
+    from models import User
     from state import app_state
 
     app_state.threat_scorer = None
@@ -61,7 +65,17 @@ async def integration_client(integration_db_session: AsyncSession):
             await integration_db_session.rollback()
             raise
 
+    async def override_get_current_user():
+        return User(
+            id=uuid4(),
+            email="integration@eviltwin.local",
+            hashed_password="not-used-in-tests",
+            role="analyst",
+            is_active=True,
+        )
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

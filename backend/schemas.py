@@ -2,13 +2,11 @@
 Pydantic schemas for request validation and response serialization.
 """
 
-from pydantic import BaseModel, ConfigDict, IPvAnyAddress
 from datetime import datetime
-from uuid import UUID
-from pydantic import BaseModel, ConfigDict, IPvAnyAddress, EmailStr
-from datetime import datetime
-from uuid import UUID
 from typing import Optional, List
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, EmailStr, IPvAnyAddress
 
 # --- Auth Schemas ---
 
