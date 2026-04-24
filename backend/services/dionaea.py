@@ -29,6 +29,14 @@ _PROTOCOL_ALIASES = {
     "tftpd": "tftp",
 }
 
+_INCIDENT_CONNECTION_MESSAGES = {
+    "accept": "accepted",
+    "connect": "initiated",
+    "free": "closed",
+    "listen": "listened for",
+    "reject": "rejected",
+}
+
 
 def _coerce_timestamp(value: Any) -> datetime:
     if isinstance(value, datetime):
@@ -107,6 +115,265 @@ def _base_payload(raw_event: dict[str, Any], honeypot_ip: str) -> dict[str, Any]
     }
 
 
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    return text or None
+
+
+def _stringify_annotation_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple, set)):
+        rendered = ", ".join(str(item) for item in value if item is not None)
+        return rendered or None
+    if isinstance(value, dict):
+        rendered = ", ".join(
+            f"{key}={item}" for key, item in value.items() if item is not None and str(item).strip()
+        )
+        return rendered or None
+
+    return _optional_text(value)
+
+
+def _annotation_summary(data: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    parts: list[str] = []
+    for key in keys:
+        value = _stringify_annotation_value(data.get(key))
+        if value is None:
+            continue
+        parts.append(f"{key}={value}")
+
+    if not parts:
+        return None
+    return "; ".join(parts)
+
+
+def _build_payload(
+    base_payload: dict[str, Any],
+    eventid: str,
+    *,
+    message: str | None = None,
+    input_text: str | None = None,
+    username: str | None = None,
+    password: str | None = None,
+) -> LogIngestRequest:
+    payload = {
+        **base_payload,
+        "eventid": eventid,
+    }
+    if message is not None:
+        payload["message"] = message
+    if input_text is not None:
+        payload["input"] = input_text
+    if username is not None:
+        payload["username"] = username
+    if password is not None:
+        payload["password"] = password
+
+    return LogIngestRequest.model_validate(payload)
+
+
+def _incident_base_payload(
+    raw_event: dict[str, Any], honeypot_ip: str
+) -> tuple[dict[str, Any], str, dict[str, Any]] | None:
+    origin = _optional_text(raw_event.get("origin"))
+    incident_data = raw_event.get("data")
+    if origin is None or not isinstance(incident_data, dict):
+        return None
+
+    connection = incident_data.get("connection")
+    if not isinstance(connection, dict):
+        return None
+
+    timestamp_value = raw_event.get("timestamp")
+    if timestamp_value is None:
+        return None
+
+    dst_port = int(connection.get("local_port") or 0)
+    protocol = _normalize_protocol(connection.get("protocol"), dst_port)
+    timestamp = _coerce_timestamp(timestamp_value)
+    dst_ip = connection.get("local_ip") or honeypot_ip
+    src_ip = connection.get("remote_ip")
+    if src_ip is None:
+        return None
+
+    session = _build_session(
+        {
+            "connection": {"id": connection.get("id")},
+            "id": connection.get("id"),
+            "src_ip": src_ip,
+            "src_port": int(connection.get("remote_port") or 0),
+            "dst_ip": dst_ip,
+            "dst_port": dst_port,
+        },
+        protocol,
+        timestamp,
+    )
+
+    return (
+        {
+            "src_ip": src_ip,
+            "src_port": int(connection.get("remote_port") or 0),
+            "dst_ip": dst_ip,
+            "dst_port": dst_port,
+            "session": session,
+            "protocol": protocol,
+            "timestamp": timestamp,
+        },
+        origin,
+        incident_data,
+    )
+
+
+def _parse_incident_event(raw_event: dict[str, Any], honeypot_ip: str) -> list[LogIngestRequest]:
+    incident_payload = _incident_base_payload(raw_event, honeypot_ip)
+    if incident_payload is None:
+        return []
+
+    base_payload, origin, incident_data = incident_payload
+    protocol = str(base_payload["protocol"])
+
+    if origin.startswith("dionaea.connection."):
+        connection_type = origin.rsplit(".", 1)[-1]
+        verb = _INCIDENT_CONNECTION_MESSAGES.get(connection_type, "observed")
+        return [
+            _build_payload(
+                base_payload,
+                origin,
+                message=f"Dionaea {verb} a {protocol} connection on port {base_payload['dst_port']}",
+            )
+        ]
+
+    if origin == "dionaea.modules.python.ftp.command":
+        command = _optional_text(incident_data.get("command"))
+        arguments = [
+            str(argument)
+            for argument in (incident_data.get("arguments") or [])
+            if argument is not None and str(argument).strip()
+        ]
+        if command is None:
+            return []
+
+        input_text = " ".join([command, *arguments]).strip()
+        upper_command = command.upper()
+        username = arguments[0] if upper_command == "USER" and arguments else None
+        password = arguments[0] if upper_command == "PASS" and arguments else None
+        return [
+            _build_payload(
+                base_payload,
+                origin,
+                message="FTP command observed by Dionaea",
+                input_text=input_text,
+                username=username,
+                password=password,
+            )
+        ]
+
+    if origin.endswith(".login") and origin.startswith("dionaea.modules.python."):
+        username = _optional_text(incident_data.get("username"))
+        password = _optional_text(incident_data.get("password"))
+        detail_keys = {
+            "ftp": (),
+            "mssql": ("hostname", "appname", "cltintname", "database", "language"),
+            "http": ("method", "path", "url", "user_agent"),
+            "smb": ("hostname",),
+        }.get(protocol, ())
+        detail_summary = _annotation_summary(incident_data, detail_keys)
+        message = f"{protocol.upper()} credential attempt observed by Dionaea"
+        if detail_summary is not None:
+            message = f"{message} ({detail_summary})"
+
+        return [
+            _build_payload(
+                base_payload,
+                origin,
+                message=message,
+                username=username,
+                password=password,
+            )
+        ]
+
+    if origin == "dionaea.modules.python.mssql.cmd":
+        command = _optional_text(incident_data.get("cmd"))
+        status = _optional_text(incident_data.get("status"))
+        message = "MSSQL query observed by Dionaea"
+        if status is not None:
+            message = f"{message} (status={status})"
+        return [
+            _build_payload(
+                base_payload,
+                origin,
+                message=message,
+                input_text=command,
+            )
+        ]
+
+    if origin == "dionaea.modules.python.smb.dcerpc.bind":
+        uuid = _optional_text(incident_data.get("uuid"))
+        transfer_syntax = _optional_text(
+            incident_data.get("transfer_syntax") or incident_data.get("transfersyntax")
+        )
+        message = "SMB DCERPC bind observed by Dionaea"
+        if transfer_syntax is not None:
+            message = f"{message} (transfer_syntax={transfer_syntax})"
+        input_text = " ".join(part for part in ["DCERPC bind", uuid] if part).strip() or None
+        return [
+            _build_payload(
+                base_payload,
+                origin,
+                message=message,
+                input_text=input_text,
+            )
+        ]
+
+    if origin == "dionaea.modules.python.smb.dcerpc.request":
+        uuid = _optional_text(incident_data.get("uuid"))
+        opnum = incident_data.get("opnum")
+        input_parts = ["DCERPC request"]
+        if uuid is not None:
+            input_parts.append(uuid)
+        if opnum is not None:
+            input_parts.append(f"opnum {opnum}")
+        return [
+            _build_payload(
+                base_payload,
+                origin,
+                message="SMB DCERPC request observed by Dionaea",
+                input_text=" ".join(input_parts),
+            )
+        ]
+
+    if protocol == "http" and any(
+        incident_data.get(key) is not None for key in ("method", "path", "url", "user_agent")
+    ):
+        method = _optional_text(incident_data.get("method"))
+        target = _optional_text(incident_data.get("path") or incident_data.get("url"))
+        detail_summary = _annotation_summary(incident_data, ("user_agent", "host"))
+        message = "HTTP request metadata observed by Dionaea"
+        if detail_summary is not None:
+            message = f"{message} ({detail_summary})"
+        input_text = " ".join(part for part in [method, target] if part).strip() or None
+        return [
+            _build_payload(
+                base_payload,
+                origin,
+                message=message,
+                input_text=input_text,
+            )
+        ]
+
+    detail_keys = tuple(key for key in incident_data.keys() if key != "connection")
+    detail_summary = _annotation_summary(incident_data, detail_keys)
+    message = f"Dionaea {protocol} incident observed"
+    if detail_summary is not None:
+        message = f"{message} ({detail_summary})"
+
+    return [_build_payload(base_payload, origin, message=message)]
+
+
 def _parse_ftp_command_events(base_payload: dict[str, Any], raw_event: dict[str, Any]) -> list[LogIngestRequest]:
     ftp_data = raw_event.get("ftp")
     if not isinstance(ftp_data, dict):
@@ -146,15 +413,13 @@ def _parse_ftp_command_events(base_payload: dict[str, Any], raw_event: dict[str,
         )
 
         payloads.append(
-            LogIngestRequest.model_validate(
-                {
-                    **base_payload,
-                    "eventid": "dionaea.modules.python.ftp.command",
-                    "message": "FTP command observed by Dionaea",
-                    "input": input_text,
-                    "username": username,
-                    "password": password,
-                }
+            _build_payload(
+                base_payload,
+                "dionaea.modules.python.ftp.command",
+                message="FTP command observed by Dionaea",
+                input_text=input_text,
+                username=username,
+                password=password,
             )
         )
 
@@ -181,14 +446,12 @@ def _parse_credential_events(base_payload: dict[str, Any], raw_event: dict[str, 
             continue
 
         payloads.append(
-            LogIngestRequest.model_validate(
-                {
-                    **base_payload,
-                    "eventid": f"dionaea.modules.python.{protocol}.login",
-                    "message": f"{protocol.upper()} credential attempt observed by Dionaea",
-                    "username": username or None,
-                    "password": password or None,
-                }
+            _build_payload(
+                base_payload,
+                f"dionaea.modules.python.{protocol}.login",
+                message=f"{protocol.upper()} credential attempt observed by Dionaea",
+                username=username or None,
+                password=password or None,
             )
         )
 
@@ -196,6 +459,10 @@ def _parse_credential_events(base_payload: dict[str, Any], raw_event: dict[str, 
 
 
 def parse_dionaea_event(raw_event: dict[str, Any], honeypot_ip: str) -> list[LogIngestRequest]:
+    incident_payloads = _parse_incident_event(raw_event, honeypot_ip)
+    if incident_payloads:
+        return incident_payloads
+
     base_payload = _base_payload(raw_event, honeypot_ip)
     if base_payload is None:
         return []
@@ -206,12 +473,10 @@ def parse_dionaea_event(raw_event: dict[str, Any], honeypot_ip: str) -> list[Log
     protocol = base_payload["protocol"]
 
     payloads = [
-        LogIngestRequest.model_validate(
-            {
-                **base_payload,
-                "eventid": f"dionaea.connection.{transport}.{connection_type}",
-                "message": f"Dionaea accepted a {protocol} connection on port {base_payload['dst_port']}",
-            }
+        _build_payload(
+            base_payload,
+            f"dionaea.connection.{transport}.{connection_type}",
+            message=f"Dionaea accepted a {protocol} connection on port {base_payload['dst_port']}",
         )
     ]
     payloads.extend(_parse_ftp_command_events(base_payload, raw_event))

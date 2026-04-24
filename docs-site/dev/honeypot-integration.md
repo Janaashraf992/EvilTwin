@@ -98,6 +98,10 @@ Event types:
 | `dionaea.connection.tcp.accept` | Dionaea | Accepted HTTP/FTP/SMB/MSSQL connection |
 | `dionaea.modules.python.ftp.command` | Dionaea | FTP command captured from the client |
 | `dionaea.modules.python.ftp.login` | Dionaea | Combined FTP credential attempt captured from the client |
+| `dionaea.modules.python.mssql.login` | Dionaea | MSSQL login with client fingerprint metadata |
+| `dionaea.modules.python.mssql.cmd` | Dionaea | MSSQL query or batch annotation |
+| `dionaea.modules.python.smb.dcerpc.bind` | Dionaea | SMB DCERPC bind annotation |
+| `dionaea.modules.python.smb.dcerpc.request` | Dionaea | SMB DCERPC request annotation |
 
 ---
 
@@ -143,7 +147,7 @@ The tailer also accepts epoch timestamps from Cowrie and converts them into UTC 
 
 ### Pattern C — Backend-side Dionaea JSON Tailer
 
-Dionaea writes structured JSON incidents to `/logs/dionaea/dionaea.json`, and the backend tails that file directly. Each JSON line is normalized into one or more `LogIngestRequest` payloads. Connection incidents become `dionaea.connection.tcp.accept` events, nested FTP command arrays become `dionaea.modules.python.ftp.command` follow-up events, and Dionaea's combined `credentials` array becomes `dionaea.modules.python.ftp.login` follow-up events so the backend records a single username/password pair instead of split partial entries.
+Dionaea writes structured JSON incidents to `/logs/dionaea/dionaea.json`, and the backend tails that file directly. The parser accepts both the older aggregated `log_json` shape and Dionaea's richer per-incident stream. Connection incidents become `dionaea.connection.tcp.accept` events, FTP commands remain `dionaea.modules.python.ftp.command`, MSSQL login and query incidents are converted into credential and command timeline entries, and SMB DCERPC bind/request incidents are normalized into session annotations on the same shared ingest contract.
 
 ### Pattern D — Canary Token Webhook
 

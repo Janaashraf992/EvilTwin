@@ -160,3 +160,106 @@ async def test_dionaea_ftp_event_creates_single_session_with_commands(
     assert session["credentials_tried"] == [
         {"username": "anonymous", "password": "demo@example.com", "success": False},
     ]
+
+
+@pytest.mark.asyncio
+async def test_dionaea_mssql_incidents_create_single_session_with_annotations(
+    integration_client,
+    integration_db_session,
+):
+    @asynccontextmanager
+    async def fake_db_factory():
+        yield integration_db_session
+
+    login_line = json.dumps(
+        {
+            "name": "dionaea",
+            "origin": "dionaea.modules.python.mssql.login",
+            "timestamp": "2026-04-24T18:12:10.000000",
+            "data": {
+                "connection": {
+                    "id": "mssql-conn-1",
+                    "local_ip": "10.0.2.10",
+                    "local_port": 1433,
+                    "remote_ip": "172.21.0.11",
+                    "remote_port": 40211,
+                    "remote_hostname": "",
+                    "protocol": "mssqld",
+                    "transport": "tcp",
+                },
+                "username": "sa",
+                "password": "P@ssw0rd!",
+                "hostname": "kali-box",
+                "appname": "sqlcmd",
+                "cltintname": "ODBC Driver 18",
+                "database": "master",
+            },
+        }
+    )
+    command_line = json.dumps(
+        {
+            "name": "dionaea",
+            "origin": "dionaea.modules.python.mssql.cmd",
+            "timestamp": "2026-04-24T18:12:30.000000",
+            "data": {
+                "connection": {
+                    "id": "mssql-conn-1",
+                    "local_ip": "10.0.2.10",
+                    "local_port": 1433,
+                    "remote_ip": "172.21.0.11",
+                    "remote_port": 40211,
+                    "remote_hostname": "",
+                    "protocol": "mssqld",
+                    "transport": "tcp",
+                },
+                "cmd": "select @@version",
+                "status": "ok",
+            },
+        }
+    )
+    smb_line = json.dumps(
+        {
+            "name": "dionaea",
+            "origin": "dionaea.modules.python.smb.dcerpc.request",
+            "timestamp": "2026-04-24T18:13:00.000000",
+            "data": {
+                "connection": {
+                    "id": "smb-conn-1",
+                    "local_ip": "10.0.2.10",
+                    "local_port": 445,
+                    "remote_ip": "172.21.0.11",
+                    "remote_port": 40445,
+                    "remote_hostname": "",
+                    "protocol": "smbd",
+                    "transport": "tcp",
+                },
+                "uuid": "3919286a-b10c-11d0-9ba8-00c04fd92ef5",
+                "opnum": 9,
+            },
+        }
+    )
+
+    assert await process_dionaea_log_line(login_line, honeypot_ip="10.0.2.10", db_factory=fake_db_factory)
+    assert await process_dionaea_log_line(command_line, honeypot_ip="10.0.2.10", db_factory=fake_db_factory)
+    assert await process_dionaea_log_line(smb_line, honeypot_ip="10.0.2.10", db_factory=fake_db_factory)
+    await integration_db_session.commit()
+
+    response = await integration_client.get(
+        "/sessions",
+        params={"page": 1, "page_size": 10, "honeypot": "dionaea", "ip": "172.21.0.11"},
+    )
+    assert response.status_code == 200
+
+    items = response.json()["items"]
+    assert len(items) == 2
+
+    mssql_session = next(item for item in items if item["protocol"] == "mssql")
+    smb_session = next(item for item in items if item["protocol"] == "smb")
+
+    assert mssql_session["credentials_tried"] == [
+        {"username": "sa", "password": "P@ssw0rd!", "success": False},
+    ]
+    assert [entry["command"] for entry in mssql_session["commands"]] == ["select @@version"]
+    assert smb_session["commands"][0]["command"] == (
+        "DCERPC request 3919286a-b10c-11d0-9ba8-00c04fd92ef5 opnum 9"
+    )
