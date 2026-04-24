@@ -3,8 +3,6 @@ id: honeypot-integration
 title: Honeypot Integration
 ---
 
-# Honeypot Integration
-
 ## What Is a Honeypot?
 
 A honeypot is a fake service that looks like a real target (an SSH server, a web form, a database port). It has no legitimate users. Anyone who interacts with it is either a scanner, an attacker, or a misconfigured device.
@@ -12,11 +10,15 @@ A honeypot is a fake service that looks like a real target (an SSH server, a web
 EvilTwin uses two honeypots:
 
 | Honeypot | What It Simulates | Events It Generates |
-|---|---|---|
+| --- | --- | --- |
 | **Cowrie** | SSH and Telnet server | Login attempts, commands run, files downloaded |
 | **Dionaea** | SMB, FTP, HTTP (malware trap) | Port probes, exploit attempts, payload captures |
 
 Both honeypots detect activity and forward structured events to the EvilTwin backend via `POST /log`. The backend aggregates events into sessions, computes threat scores, and triggers alerts when scores are high.
+
+In the current Docker Compose demo path, Cowrie does not send HTTP requests itself. Instead, the backend mounts the Cowrie log volume read-only at `/logs/cowrie` and tails `cowrie.json` directly. Each JSON line is normalized into the `LogIngestRequest` schema and then passed through the same shared ingestion service used by `POST /log`.
+
+To keep backend traffic on the internal sensor path while still making the honeypots reachable from Kali or another test VM, Docker Compose attaches Cowrie and Dionaea to two networks: the internal `deception-net` and a dedicated `honeypot-ingress` bridge used only for host-published demo ports. This keeps the backend integration stable while preserving the original attacker source IP in the honeypot logs.
 
 :::note
 The `/log` ingest endpoint does **not** require JWT authentication. Honeypots run inside the container network and cannot hold tokens. Network isolation (the `internal` Docker network) is the security control here — `/log` is never exposed on the public interface.
@@ -48,15 +50,16 @@ sequenceDiagram
 All events from a single attacker are grouped into a session. The session is identified by a combination of fields:
 
 | Field | Source | Notes |
-|---|---|---|
-| `source_ip` | Attacker's IP | Primary grouping key |
-| `sensor_id` | Hostname of the honeypot container | Distinguishes cowrie from dionaea |
-| `protocol` | `"ssh"`, `"ftp"`, `"smb"`, etc. | Part of session context |
-| `session_id` | Honeypot's internal session UUID | Optional — used for per-connection granularity |
+| --- | --- | --- |
+| `src_ip` | Attacker's IP | Primary grouping key |
+| `session` | Honeypot session identifier | Combined with `src_ip` to create a stable UUID |
+| `protocol` | `"ssh"`, `"telnet"`, `"ftp"`, `"smb"`, etc. | Part of session context |
+| `eventid` | Honeypot event family | Used to infer the honeypot type |
 
 Session boundaries:
-- A new session is created when a new `(source_ip, sensor_id)` pair is seen
-- Events from the same attacker across multiple honeypots create **separate sessions** (one per sensor)
+
+- A stable session UUID is generated from `uuid5(src_ip, session)`
+- Events from the same attacker across multiple honeypots create **separate sessions** when the honeypot session key differs
 - Session updates continue until the honeypot reports the connection closed
 
 ---
@@ -65,78 +68,83 @@ Session boundaries:
 
 ```json
 {
-  "source_ip": "203.0.113.7",
-  "sensor_id": "cowrie-1",
+  "eventid": "cowrie.command.input",
+  "src_ip": "203.0.113.7",
+  "src_port": 54321,
+  "dst_ip": "10.0.2.10",
+  "dst_port": 22,
+  "session": "cowrie-session-123",
   "protocol": "ssh",
-  "event_type": "login_attempt",
+  "message": "uid=0(root) gid=0(root)",
+  "input": "id",
   "username": "admin",
   "password": "1234",
-  "command": null,
-  "filename": null,
-  "timestamp": "2024-01-15T10:22:33Z",
-  "session_id": "a4c3b2d1-..."
+  "timestamp": "2024-01-15T10:22:33Z"
 }
 ```
 
-**Required fields:** `source_ip`, `sensor_id`, `protocol`, `event_type`, `timestamp`
+**Required fields:** `eventid`, `src_ip`, `src_port`, `dst_ip`, `dst_port`, `session`, `protocol`, `timestamp`
 
-**Optional fields:** `username`, `password`, `command`, `filename`, `session_id`
+**Optional fields:** `message`, `input`, `username`, `password`
 
 Event types:
 
 | `event_type` | Honeypot | Meaning |
-|---|---|---|
-| `login_attempt` | Cowrie | Attacker tried a username/password |
-| `login_success` | Cowrie | Attacker's credentials were accepted (by the fake shell) |
-| `command` | Cowrie | Attacker ran a command in the fake shell |
-| `file_download` | Cowrie | Attacker downloaded a file (possible payload) |
-| `probe` | Dionaea | Port scan or protocol probe |
-| `exploit_attempt` | Dionaea | Known exploit signature matched |
-| `payload_capture` | Dionaea | Malware binary or shellcode captured |
-| `connection_closed` | Both | Connection terminated |
+| --- | --- | --- |
+| `cowrie.login.failed` | Cowrie | Failed credential attempt |
+| `cowrie.login.success` | Cowrie | Fake shell login accepted |
+| `cowrie.command.input` | Cowrie | Command entered in the fake shell |
+| `cowrie.session.file_download` | Cowrie | Payload retrieval attempt |
+| `dionaea.connection.tcp.accept` | Dionaea | Accepted HTTP/FTP/SMB/MSSQL connection |
+| `dionaea.modules.python.ftp.command` | Dionaea | FTP command captured from the client |
 
 ---
 
 ## Integration Patterns
 
-### Pattern A — Cowrie JSON Log Forwarder
+### Pattern A — Backend-side Cowrie Log Tailer
 
-Cowrie writes JSON event files to `/var/log/cowrie/cowrie.json`. A lightweight Python forwarder (`cowrie/log_forwarder.py`) tails this file and POSTs each line to `/log`:
+Cowrie writes JSON events to its own container volume. The backend mounts that volume at `/logs/cowrie` and tails `cowrie.json` directly. This keeps the live demo path simple because Cowrie does not need API credentials or an extra sidecar.
 
 ```python
-import json, time, requests
-
-LOG_PATH = "/var/log/cowrie/cowrie.json"
-BACKEND_URL = "http://backend:8000/log"
-
-with open(LOG_PATH) as f:
-    f.seek(0, 2)  # seek to end
+async def watch_cowrie_log(log_path, honeypot_ip, poll_interval_seconds):
+  with open(log_path, "r", encoding="utf-8") as handle:
+    handle.seek(0, 2)
     while True:
-        line = f.readline()
-        if line:
-            event = json.loads(line)
-            requests.post(BACKEND_URL, json=map_cowrie_event(event))
-        else:
-            time.sleep(0.5)
+      line = handle.readline()
+      if line:
+        payload = parse_cowrie_event(json.loads(line), honeypot_ip)
+        await ingest_event(payload, db_session, app_state)
+      else:
+        await asyncio.sleep(poll_interval_seconds)
 ```
 
-The `map_cowrie_event()` function translates Cowrie's field names to the EvilTwin schema.
+The tailer also accepts epoch timestamps from Cowrie and converts them into UTC datetimes before validation.
 
-### Pattern B — Dionaea REST Webhook
+### Pattern B — Direct `POST /log` Sensor Integration
 
-Dionaea supports HTTP POST webhooks natively. Configure `dionaea.cfg` to POST to the backend:
+`POST /log` is still the public sensor contract for tests, custom sensors, and future adapters. Any component that can produce the same schema can reuse the shared ingest service.
 
-```ini
-[module dionaea.modules.python.virustotal]
-# Not used — EvilTwin handles payload analysis
-
-[module dionaea.log.json]
-url = http://backend:8000/log
+```json
+{
+  "eventid": "cowrie.login.success",
+  "src_ip": "198.51.100.10",
+  "src_port": 33333,
+  "dst_ip": "10.0.2.10",
+  "dst_port": 22,
+  "session": "sensor-session-uuid",
+  "protocol": "ssh",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "username": "root",
+  "password": "toor"
+}
 ```
 
-The Dionaea event payload is automatically mapped to the EvilTwin schema by the backend ingest handler.
+### Pattern C — Backend-side Dionaea JSON Tailer
 
-### Pattern C — Canary Token Webhook
+Dionaea writes structured JSON incidents to `/logs/dionaea/dionaea.json`, and the backend tails that file directly. Each JSON line is normalized into one or more `LogIngestRequest` payloads. Connection incidents become `dionaea.connection.tcp.accept` events, and nested FTP command arrays become `dionaea.modules.python.ftp.command` follow-up events that append to the same session.
+
+### Pattern D — Canary Token Webhook
 
 Canarytokens.org tokens (or self-hosted Canary appliances) generate a webhook when a token is triggered (e.g., a fake AWS key is used, or a PDF is opened).
 
@@ -162,53 +170,54 @@ Deploy one canary token per sensitive resource class: a fake admin SSH key, a fa
 
 Before going live, verify:
 
-- [ ] Honeypot container sends events to `http://backend:8000/log` (not `localhost`)
-- [ ] `POST /log` is reachable from within the Docker internal network
-- [ ] `POST /log` is **not** exposed on the host machine (check `docker-compose.yml` port bindings — `8000` should only be on `127.0.0.1`)
-- [ ] Honeypot `sensor_id` is unique and descriptive (`cowrie-dmz`, `dionaea-prod`, etc.)
-- [ ] Cowrie `cowrie.cfg` sets `log_json = true` (required for the log forwarder)
+- [ ] Backend mounts `cowrie-logs` read-only at `/logs/cowrie`
+- [ ] `cowrie.json` exists and grows while SSH activity is happening
+- [ ] Cowrie uses JSON logging and the backend can read the mounted volume
+- [ ] The seeded demo account can authenticate to the dashboard and protected APIs
 - [ ] Canary webhook secret is set in `.env` (`CANARY_WEBHOOK_SECRET=...`)
-- [ ] Events appear in `GET /sessions` within 5 seconds of a simulated trigger
+- [ ] Events appear in `GET /sessions` within 5 seconds of a simulated Cowrie or Dionaea trigger
 
 ---
 
 ## Verification Procedure
 
 **Step 1 — Start services:**
+
 ```bash
 docker compose up -d
 ```
 
 **Step 2 — Acquire a JWT token:**
+
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"analyst@example.com","password":"yourpassword"}' \
-  | jq -r '.access_token')
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "username=analyst@eviltwin.local" \
+  --data-urlencode "password=eviltwin-demo" \
+  | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])")
 ```
 
-**Step 3 — Simulate an SSH brute-force:**
+**Step 3 — Trigger Cowrie activity:**
+
 ```bash
-# Send 5 login attempt events from the same IP
-for i in {1..5}; do
-  curl -s -X POST http://localhost:8000/log \
-    -H "Content-Type: application/json" \
-    -d "{\"source_ip\":\"10.99.0.$i\",\"sensor_id\":\"cowrie-test\",\"protocol\":\"ssh\",\"event_type\":\"login_attempt\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"username\":\"root\",\"password\":\"password$i\"}"
-done
+ssh -p 2222 -o StrictHostKeyChecking=no root@<DOCKER_HOST_IP>
+# enter any password, then run: whoami, id, uname -a, exit
 ```
 
 **Step 4 — Verify session was created:**
+
 ```bash
 curl -s http://localhost:8000/sessions \
-  -H "Authorization: Bearer $TOKEN" | jq '.items[0]'
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
 ```
 
-Expected: session from `10.99.0.1` (the lowest IP, first event), with `event_count = 5` or higher if ML scoring ran.
+Expected: at least one recent `cowrie` session with SSH commands captured in the `commands` array.
 
 **Step 5 — Verify threat score:**
+
 ```bash
-curl -s http://localhost:8000/score/10.99.0.1 \
-  -H "Authorization: Bearer $TOKEN" | jq .
+curl -s http://localhost:8000/score/<ATTACKER_IP> \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
 ```
 
-Expected: `score > 0` with `threat_level` of `low` or higher.
+Expected: a JSON response with `threat_score` and `threat_level`. For the full operator flow, use [Kali Demo Walkthrough](/docs/kali-demo-walkthrough).

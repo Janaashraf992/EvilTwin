@@ -2,6 +2,8 @@ module.exports = {
   platformSidebar: [
     "intro",
     "getting-started",
+    "running-the-project",
+    "kali-demo-walkthrough",
     "master-guide",
     {
       type: "category",

