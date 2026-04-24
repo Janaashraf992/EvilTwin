@@ -18,7 +18,9 @@ RUN addgroup -S eviltwin && adduser -S eviltwin -G eviltwin
 COPY --from=builder /app/package.json .
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/vite.config.ts .
+COPY --from=builder /app/vite.config.js .
+
+RUN chown -R eviltwin:eviltwin /app
 
 USER eviltwin
 

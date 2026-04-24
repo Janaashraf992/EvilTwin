@@ -8,7 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && useradd -m -u 1000 ryu
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir "setuptools<58" && \
+    pip install --no-cache-dir -r requirements.txt && \
+    sed -i 's/from eventlet.wsgi import ALREADY_HANDLED/ALREADY_HANDLED = b""/g' \
+        /usr/local/lib/python3.11/site-packages/ryu/app/wsgi.py
 
 COPY --chown=ryu:ryu . .
 

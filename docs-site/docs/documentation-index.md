@@ -4,8 +4,6 @@ title: Documentation Index
 slug: /documentation-index
 ---
 
-# EvilTwin Documentation Index
-
 This page is the complete map to all documentation. Use it when you know what you want but not where to find it.
 
 ## User-Facing Documentation (`/docs`)
@@ -13,10 +11,12 @@ This page is the complete map to all documentation. Use it when you know what yo
 These documents are written for security analysts, platform operators, and new team members.
 
 | Document | What you will find |
-|---|---|
+| --- | --- |
 | [Introduction](./intro.md) | Platform overview, key concepts glossary, role-based navigation |
 | [Getting Started](./getting-started.md) | Step-by-step setup from scratch to running platform with auth and AI |
+| [Running the Project](./running-the-project.md) | Tested clone-and-run workflow for the full stack with the current Docker path |
 | [Master Guide](./master-guide.md) | Single-page narrative of the whole platform with architecture diagrams |
+| [Kali Demo Walkthrough](./kali-demo-walkthrough.md) | Operator-ready demo from Docker host plus Kali VM with exact attack commands |
 | [Operations and Deployment](./operations-and-deployment.md) | Bootstrap checklist, TLS setup, database backup, day-2 runbooks |
 | [Troubleshooting](./troubleshooting.md) | Symptom → cause → fix for auth, backend, AI, frontend, SDN issues |
 | [Incident Response Runbook](./incident-response-runbook.md) | SOC playbooks by threat level including AI-assisted triage commands |
@@ -27,7 +27,7 @@ These documents are written for security analysts, platform operators, and new t
 These documents are for engineers building, extending, or operating the platform.
 
 | Document | What you will find |
-|---|---|
+| --- | --- |
 | [System Overview](/dev/system-overview) | Platform capabilities, component responsibilities, and design philosophy |
 | [Architecture Overview](/dev/architecture-overview) | Service topology, data flow, trust boundaries, sequence diagrams |
 | [Backend Design](/dev/backend-design) | FastAPI structure, routers, services, data models, auth, LLM integration |
@@ -45,7 +45,7 @@ These documents are for engineers building, extending, or operating the platform
 ## Key Cross-References
 
 | "I want to understand..." | Go to |
-|---|---|
+| --- | --- |
 | The big picture in one page | [Master Guide](./master-guide.md) |
 | What each service does | [System Overview](/dev/system-overview) |
 | How data flows from honeypot to dashboard | [Architecture Overview](/dev/architecture-overview) + [Master Guide data flow diagram](./master-guide.md) |
@@ -53,6 +53,8 @@ These documents are for engineers building, extending, or operating the platform
 | Every environment variable | [Environment Configuration](/dev/environment-configuration) |
 | How the ML threat score works | [AI Threat Scoring](/dev/ai-threat-scoring) |
 | How to set up the platform for the first time | [Getting Started](./getting-started.md) |
+| How to run the full tested stack after cloning | [Running the Project](./running-the-project.md) |
+| How to run the live Kali attack demo | [Kali Demo Walkthrough](./kali-demo-walkthrough.md) |
 | What to do when an alert fires | [Incident Response Runbook](./incident-response-runbook.md) |
 | Why a feature is broken | [Troubleshooting](./troubleshooting.md) |
 | How to run tests | [Testing and Quality](/dev/testing-and-quality) |

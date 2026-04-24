@@ -1,5 +1,4 @@
 import { useAlertStore } from "../../store/alertStore";
-import { CountryFlag } from "../shared/CountryFlag";
 import { ThreatBadge } from "../shared/ThreatBadge";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -55,7 +54,6 @@ export function ThreatFeed() {
                   <ThreatBadge level={alert.threat_level} />
                   <span className="text-xs text-text-muted">{getRelativeTime(alert.created_at)}</span>
                 </div>
-                <CountryFlag />
               </div>
               <p className="font-mono text-sm text-safe truncate">{alert.attacker_ip}</p>
               <p className="mt-1 text-sm text-text-primary/90 leading-snug">{alert.message}</p>
