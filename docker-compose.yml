@@ -1,0 +1,206 @@
+services:
+  # ============================================================================
+  # PostgreSQL Database
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: eviltwin-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-eviltwin}
+      POSTGRES_USER: ${POSTGRES_USER:-eviltwin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - eviltwin-net
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eviltwin} -d ${POSTGRES_DB:-eviltwin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ============================================================================
+  # Cowrie SSH Honeypot
+  # ============================================================================
+  cowrie:
+    build:
+      context: ./honeypots/cowrie
+      dockerfile: Dockerfile
+    container_name: eviltwin-cowrie
+    volumes:
+      - cowrie-logs:/cowrie/var/log/cowrie
+      - cowrie-downloads:/cowrie/var/lib/cowrie/downloads
+    networks:
+      - deception-net
+      - honeypot-ingress
+    ports:
+      - "2222:22"
+    restart: unless-stopped
+
+  # ============================================================================
+  # Dionaea Multi-Protocol Honeypot
+  # ============================================================================
+  dionaea:
+    build:
+      context: ./honeypots/dionaea
+      dockerfile: Dockerfile
+    container_name: eviltwin-dionaea
+    volumes:
+      - dionaea-logs:/opt/dionaea/var/log
+      - dionaea-captures:/opt/dionaea/var/lib/dionaea/binaries
+    networks:
+      - deception-net
+      - honeypot-ingress
+    ports:
+      - "${DIONAEA_FTP_PORT:-2121}:21"
+      - "${DIONAEA_HTTP_PORT:-8081}:80"
+      - "${DIONAEA_SMB_PORT:-1445}:445"
+      - "${DIONAEA_MSSQL_PORT:-11433}:1433"
+    restart: unless-stopped
+
+  # ============================================================================
+  # SDN Controller (Ryu)
+  # ============================================================================
+  ryu:
+    build:
+      context: ./sdn
+      dockerfile: Dockerfile
+    container_name: eviltwin-ryu
+    environment:
+      BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
+      HONEYPOT_IP: ${HONEYPOT_IP:-10.0.2.10}
+      THREAT_REDIRECT_THRESHOLD: ${THREAT_REDIRECT_THRESHOLD:-2}
+    networks:
+      - eviltwin-net
+    ports:
+      - "6633:6633"
+      - "8080:8080"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+
+  # ============================================================================
+  # Backend API (FastAPI)
+  # ============================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: eviltwin-backend
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-eviltwin}
+      POSTGRES_USER: ${POSTGRES_USER:-eviltwin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      RYU_REST_URL: ${RYU_REST_URL:-http://ryu:8080}
+      HONEYPOT_IP: ${HONEYPOT_IP:-10.0.2.10}
+      THREAT_REDIRECT_THRESHOLD: ${THREAT_REDIRECT_THRESHOLD:-2}
+      MODEL_PATH: ${MODEL_PATH:-/app/ai/model.pkl}
+      SCORE_CACHE_TTL: ${SCORE_CACHE_TTL:-300}
+      IPINFO_TOKEN: ${IPINFO_TOKEN:-}
+      ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
+      SPLUNK_HEC_URL: ${SPLUNK_HEC_URL:-}
+      SPLUNK_HEC_TOKEN: ${SPLUNK_HEC_TOKEN:-}
+      CANARY_WEBHOOK_SECRET: ${CANARY_WEBHOOK_SECRET:?CANARY_WEBHOOK_SECRET is required}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      DEMO_BOOTSTRAP: ${DEMO_BOOTSTRAP:-true}
+      DEMO_USER_EMAIL: ${DEMO_USER_EMAIL:-analyst@eviltwin.local}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-eviltwin-demo}
+      DEMO_USER_ROLE: ${DEMO_USER_ROLE:-analyst}
+    volumes:
+      - cowrie-logs:/logs/cowrie:ro
+      - dionaea-logs:/logs/dionaea:ro
+    networks:
+      - eviltwin-net
+      - deception-net
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ============================================================================
+  # React Frontend Dashboard
+  # ============================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: eviltwin-frontend
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8000/ws/alerts}
+    networks:
+      - eviltwin-net
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # ============================================================================
+  # Splunk Universal Forwarder
+  # ============================================================================
+  splunk-forwarder:
+    image: splunk/universalforwarder:latest
+    container_name: eviltwin-splunk-fwd
+    environment:
+      SPLUNK_START_ARGS: "--accept-license"
+      SPLUNK_GENERAL_TERMS: "--accept-sgt-current-at-splunk-com"
+      SPLUNK_PASSWORD: ${SPLUNK_HEC_TOKEN:-changeme123}
+    volumes:
+      - cowrie-logs:/cowrie/var/log/cowrie:ro
+      - ./splunk/inputs.conf:/opt/splunkforwarder/etc/system/local/inputs.conf:ro
+      - ./splunk/outputs.conf:/opt/splunkforwarder/etc/system/local/outputs.conf:ro
+    networks:
+      - eviltwin-net
+    restart: unless-stopped
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  eviltwin-net:
+    driver: bridge
+    name: eviltwin-net
+
+  honeypot-ingress:
+    driver: bridge
+    name: eviltwin-honeypot-ingress
+
+  deception-net:
+    driver: bridge
+    name: deception-net
+    internal: true
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  pgdata:
+    name: eviltwin-pgdata
+  cowrie-logs:
+    name: eviltwin-cowrie-logs
+  cowrie-downloads:
+    name: eviltwin-cowrie-downloads
+  dionaea-logs:
+    name: eviltwin-dionaea-logs
+  dionaea-captures:
+    name: eviltwin-dionaea-captures
