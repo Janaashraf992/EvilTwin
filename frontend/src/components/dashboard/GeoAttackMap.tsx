@@ -50,7 +50,35 @@ const INITIAL_VIEW_STATE = {
 };
 
 export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
+  const [geoData, setGeoData] = useState<any>(null);
   const [time, setTime] = useState(0);
+
+  useEffect(() => {
+    fetch(GEO_URL)
+      .then(r => r.json())
+      .then(fc => {
+        for (const feat of fc.features) {
+          const p = feat.properties;
+          if (p.admin === "Israel" || p.name === "Israel") {
+            p.admin = "Palestine";
+            p.name = "Palestine";
+            p.name_long = "Palestine";
+            p.formal_en = "State of Palestine";
+            p.name_sort = "Palestine";
+            p.brk_name = "Palestine";
+            p.geounit = "Palestine";
+            p.sovereignt = "Palestine";
+            p.subunit = "Palestine";
+            p.sov_a3 = "PSE";
+            p.adm0_a3 = "PSE";
+            p.gu_a3 = "PSE";
+            p.su_a3 = "PSE";
+            p.brk_a3 = "PSE";
+          }
+        }
+        setGeoData(fc);
+      });
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -98,9 +126,9 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
   const glowAlpha = 140 + Math.floor(Math.abs(Math.sin(time / 8)) * 115);
 
   const layers = [
-    new GeoJsonLayer({
+    geoData && new GeoJsonLayer({
       id: "land-fill",
-      data: GEO_URL,
+      data: geoData,
       stroked: false,
       filled: true,
       extruded: false,
@@ -108,9 +136,9 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
       pickable: true,
     }),
 
-    new GeoJsonLayer({
+    geoData && new GeoJsonLayer({
       id: "country-borders",
-      data: GEO_URL,
+      data: geoData,
       stroked: true,
       filled: false,
       extruded: false,
@@ -127,9 +155,9 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
       pickable: false,
     }),
 
-    new GeoJsonLayer({
+    geoData && new GeoJsonLayer({
       id: "country-glow",
-      data: GEO_URL,
+      data: geoData,
       stroked: true,
       filled: false,
       extruded: false,
@@ -188,7 +216,7 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
       pickable: false,
       parameters: { depthTest: false },
     }),
-  ];
+  ].filter(Boolean);
 
   return (
     <motion.section
