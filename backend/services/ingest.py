@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ip_utils import is_private_or_reserved
 from models import Alert, AttackerProfile, SessionLog
 from schemas import LogIngestRequest, LogIngestResponse
 from state import AppState, app_state
@@ -31,6 +32,10 @@ async def ingest_event(
 ) -> LogIngestResponse:
     started = time.perf_counter()
     src_ip = str(payload.src_ip)
+
+    if is_private_or_reserved(src_ip):
+        raise HTTPException(status_code=422, detail=f"Rejected private/reserved IP: {src_ip}")
+
     current_session_id = session_uuid(src_ip, payload.session)
 
     profile = await db.get(AttackerProfile, src_ip)

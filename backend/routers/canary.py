@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import get_settings
 from database import get_db
 from deps import get_current_user
+from ip_utils import is_private_or_reserved
 from models import Alert, AttackerProfile, CanaryToken, SessionLog, User
 from schemas import (
     CanaryTokenCreate,
@@ -137,6 +138,10 @@ async def ingest_canary(
     threat_level = registered_token.difficulty if registered_token is not None else 3
 
     ip = str(payload.src_ip)
+
+    if is_private_or_reserved(ip):
+        raise HTTPException(status_code=422, detail=f"Rejected private/reserved IP: {ip}")
+
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     profile = await db.get(AttackerProfile, ip)
     if profile is None:
