@@ -6,8 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from deps import get_current_user
-from models import AttackerProfile, User
+from models import AttackerProfile
 from schemas import ScoreResponse
 from state import app_state
 
@@ -18,7 +17,6 @@ router = APIRouter(prefix="/score", tags=["scoring"])
 async def get_score(
     ip: str,
     db: AsyncSession = Depends(get_db),
-    _current_user: User = Depends(get_current_user),
 ) -> ScoreResponse:
     try:
         parsed_ip = str(ipaddress.ip_address(ip))
