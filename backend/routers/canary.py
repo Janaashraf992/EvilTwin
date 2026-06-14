@@ -137,22 +137,24 @@ async def ingest_canary(
     threat_level = registered_token.difficulty if registered_token is not None else 3
 
     ip = str(payload.src_ip)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     profile = await db.get(AttackerProfile, ip)
     if profile is None:
         profile = AttackerProfile(
             ip=ip,
-            first_seen=datetime.now(timezone.utc).replace(tzinfo=None),
-            last_seen=datetime.now(timezone.utc).replace(tzinfo=None),
+            first_seen=now,
+            last_seen=now,
             total_sessions=1,
-            threat_score=threat_level / 4.0,
-            threat_level=threat_level,
         )
         db.add(profile)
     else:
-        profile.last_seen = datetime.now(timezone.utc).replace(tzinfo=None)
+        profile.last_seen = now
         profile.total_sessions = (profile.total_sessions or 0) + 1
-        profile.threat_level = max(profile.threat_level or 0, threat_level)
-        profile.threat_score = max(profile.threat_score or 0.0, threat_level / 4.0)
+
+    diff = registered_token.difficulty if registered_token is not None else 3
+    profile.canary_triggered = True
+    profile.canary_max_difficulty = max(profile.canary_max_difficulty or 0, diff)
+    profile.canary_trigger_count = (profile.canary_trigger_count or 0) + 1
 
     session = SessionLog(
         id=uuid.uuid4(),
@@ -169,10 +171,21 @@ async def ingest_canary(
     db.add(session)
     await db.flush()
 
+    if app_state.threat_scorer:
+        score, level = await app_state.threat_scorer.score(
+            session, profile, multi_protocol=False, known_bad_ip=bool(profile.vpn_detected)
+        )
+    else:
+        score, level = 0.0, 0
+
+    profile.threat_score = max(score, profile.threat_score or 0.0)
+    profile.threat_level = max(level, profile.threat_level or 0)
+    await db.flush()
+
     alert = Alert(
         session_id=session.id,
         attacker_ip=ip,
-        threat_level=threat_level,
+        threat_level=level,
         message=f"Canary token triggered: {payload.token_id}",
     )
     db.add(alert)

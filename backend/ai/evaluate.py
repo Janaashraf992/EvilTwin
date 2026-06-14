@@ -20,7 +20,6 @@ def evaluate_model() -> None:
 
     pipeline = train_model()
 
-    # Cross-validated predictions for unbiased evaluation
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     y_pred = cross_val_predict(pipeline, X, y, cv=cv)
 
@@ -45,10 +44,9 @@ def evaluate_model() -> None:
     clf = pipeline.named_steps["classifier"]
     importances = clf.feature_importances_
     for idx, score in sorted(enumerate(importances), key=lambda x: x[1], reverse=True):
-        bar = "█" * int(score * 50)
-        print(f"  {FEATURES[idx]:<25s} {score:.4f}  {bar}")
+        bar = "\u2588" * int(score * 50)
+        print(f"  {FEATURES[idx]:<30s} {score:.4f}  {bar}")
 
-    # Per-class accuracy
     print("\n" + "=" * 60)
     print("PER-CLASS ACCURACY")
     print("=" * 60)

@@ -56,6 +56,11 @@ class AttackerProfile(Base):
     # Threat scoring
     threat_score = Column(Float, default=0.0, nullable=False)  # 0.0-1.0
     threat_level = Column(Integer, default=0, nullable=False)  # 0=unknown, 1=low, 2=medium, 3=high, 4=critical
+
+    # Canary token metadata (fed to ML feature extractor, not used directly for scoring)
+    canary_triggered = Column(Boolean, default=False, nullable=False)
+    canary_max_difficulty = Column(Integer, default=0, nullable=False)
+    canary_trigger_count = Column(Integer, default=0, nullable=False)
     
     # Temporal tracking
     first_seen = Column(DateTime, nullable=False, default=_utcnow)

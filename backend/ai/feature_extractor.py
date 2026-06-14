@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,6 +21,10 @@ FEATURES = [
     "data_exfil_attempt",
     "malware_dropped",
     "multi_protocol",
+    "canary_triggered",
+    "canary_max_difficulty",
+    "canary_trigger_count",
+    "seconds_since_last_event",
 ]
 
 DOWNLOAD_PATTERNS = ("wget", "curl", "tftp")
@@ -82,6 +87,19 @@ def extract_features(session: Any, profile: Any, multi_protocol: bool = False, k
     malware_hashes = getattr(session, "malware_hashes", []) or []
     malware_dropped = float(len(malware_hashes) > 0)
 
+    canary_triggered = float(bool(getattr(profile, "canary_triggered", False)))
+    canary_max_difficulty = float(getattr(profile, "canary_max_difficulty", 0) or 0)
+    canary_trigger_count = min(float(getattr(profile, "canary_trigger_count", 0) or 0), 50.0)
+
+    last_seen = getattr(profile, "last_seen", None)
+    if last_seen is not None:
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        seconds_since_last_event = float((datetime.now(timezone.utc) - last_seen).total_seconds())
+    else:
+        seconds_since_last_event = 0.0
+    seconds_since_last_event = min(seconds_since_last_event, 86400.0)
+
     return [
         cmd_count,
         unique_cmd_ratio,
@@ -99,4 +117,8 @@ def extract_features(session: Any, profile: Any, multi_protocol: bool = False, k
         data_exfil_attempt,
         malware_dropped,
         float(multi_protocol),
+        canary_triggered,
+        canary_max_difficulty,
+        canary_trigger_count,
+        seconds_since_last_event,
     ]

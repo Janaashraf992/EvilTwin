@@ -97,8 +97,20 @@ async def ingest_event(
         if vpn.longitude is not None:
             profile.longitude = vpn.longitude
 
+    known_bad_ip = bool(profile.vpn_detected)
+
+    multi_protocol = False
+    if profile.total_sessions and profile.total_sessions > 1:
+        from sqlalchemy import func, select
+        stmt = select(func.count(func.distinct(SessionLog.protocol))).where(SessionLog.attacker_ip == src_ip)
+        res = await db.execute(stmt)
+        distinct_protocols = res.scalar() or 1
+        multi_protocol = distinct_protocols > 1
+
     if runtime_state.threat_scorer:
-        score, level = await runtime_state.threat_scorer.score(session, profile)
+        score, level = await runtime_state.threat_scorer.score(
+            session, profile, multi_protocol=multi_protocol, known_bad_ip=known_bad_ip
+        )
     else:
         score, level = 0.0, 0
 

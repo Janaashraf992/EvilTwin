@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import joblib
@@ -15,14 +17,14 @@ class ThreatScorer:
         self.model_path = model_path
         self.cache: TTLCache = TTLCache(maxsize=10000, ttl=ttl_seconds)
         self.pipeline = self._load_pipeline()
+        self._executor = ThreadPoolExecutor(max_workers=2)
 
     def _load_pipeline(self) -> Any:
         if os.path.exists(self.model_path):
             return joblib.load(self.model_path)
         return None
 
-    async def score(self, session: Any, profile: Any, multi_protocol: bool = False, known_bad_ip: bool = False) -> tuple[float, int]:
-        ip_key = str(getattr(profile, "ip", ""))
+    def _score_sync(self, ip_key: str, session: Any, profile: Any, multi_protocol: bool, known_bad_ip: bool) -> tuple[float, int]:
         if ip_key and ip_key in self.cache:
             cached = self.cache[ip_key]
             return cached[0], cached[1]
@@ -42,3 +44,24 @@ class ThreatScorer:
         if ip_key:
             self.cache[ip_key] = result
         return result
+
+    async def score(self, session: Any, profile: Any, multi_protocol: bool = False, known_bad_ip: bool = False) -> tuple[float, int]:
+        ip_key = str(getattr(profile, "ip", ""))
+
+        if ip_key and ip_key in self.cache:
+            cached = self.cache[ip_key]
+            return cached[0], cached[1]
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._executor,
+            self._score_sync,
+            ip_key,
+            session,
+            profile,
+            multi_protocol,
+            known_bad_ip,
+        )
+
+    async def close(self) -> None:
+        self._executor.shutdown(wait=False)
