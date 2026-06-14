@@ -98,7 +98,6 @@ class TripwireHandler(FileSystemEventHandler):
             return
         if event.event_type in ("opened", "modified", "moved", "deleted", "created", "closed"):
             logger.info("TRIGGERED: %s -> %s", event.event_type, event.src_path)
-            fire_webhook(event.src_path, event.event_type)
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +108,7 @@ class BaitHTTPHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=WATCH_DIR, **kwargs)
 
     def do_GET(self):
-        client_ip = self.client_address[0]
+        client_ip = self._client_ip()
         user_agent = self.headers.get("User-Agent", "Unknown")
         path = self.path or "/"
 
@@ -125,6 +124,15 @@ class BaitHTTPHandler(SimpleHTTPRequestHandler):
             )
 
         super().do_GET()
+
+    def _client_ip(self) -> str:
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        real_ip = self.headers.get("X-Real-IP", "")
+        if real_ip:
+            return real_ip.strip()
+        return self.client_address[0]
 
     def log_message(self, format, *args):
         pass  # We log via the standard logger already
