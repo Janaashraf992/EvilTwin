@@ -4,12 +4,10 @@ import { GeoJsonLayer, ArcLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { motion } from "framer-motion";
 import type { SessionLog } from "../../types";
 
-const GEO_URL = "https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_110m_admin_0_countries.geojson";
+const GEO_URL = "https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_50m_admin_0_countries.geojson";
 
-// Honeypot coordinate (Egypt – Cairo)
 const HONEYPOT_COORD: [number, number] = [31.2357, 30.0444];
 
-// Fallback coords
 const COUNTRY_COORDS: Record<string, [number, number]> = {
   US: [-98, 39], DE: [10, 51], FR: [2, 46], GB: [-3, 55], CN: [104, 35],
   RU: [100, 60], IN: [78, 22], BR: [-51, -10], JP: [138, 36], KR: [128, 36],
@@ -17,12 +15,29 @@ const COUNTRY_COORDS: Record<string, [number, number]> = {
   ZA: [22, -30], EG: [30, 26], NG: [8, 10], CO: [-74, 4], MX: [-102, 23]
 };
 
+const OCEAN_COLOR: [number, number, number, number] = [16, 32, 64, 255];
+
+const CONTINENT_FILLS: Record<string, [number, number, number, number]> = {
+  "North America": [107, 142, 75, 255],
+  "South America": [76, 135, 60, 255],
+  "Europe":        [120, 155, 90, 255],
+  "Africa":        [194, 178, 128, 255],
+  "Asia":          [155, 160, 100, 255],
+  "Oceania":       [140, 160, 90, 255],
+  "Antarctica":    [210, 220, 230, 255],
+};
+
+function getContinentFillColor(props: any): [number, number, number, number] {
+  const continent = props?.CONTINENT || props?.continent || "";
+  return CONTINENT_FILLS[continent] || [130, 140, 100, 255];
+}
+
 function getThreatColorRgb(level: number): [number, number, number] {
-  if (level >= 4) return [230, 57, 70]; // critical - red
-  if (level === 3) return [244, 162, 97]; // high - orange
-  if (level === 2) return [233, 196, 106]; // moderate - yellow
-  if (level === 1) return [46, 196, 182]; // easy - teal
-  return [107, 114, 128]; // benign/unknown - grey
+  if (level >= 4) return [230, 57, 70];
+  if (level === 3) return [244, 162, 97];
+  if (level === 2) return [233, 196, 106];
+  if (level === 1) return [46, 196, 182];
+  return [107, 114, 128];
 }
 
 const INITIAL_VIEW_STATE = {
@@ -37,7 +52,6 @@ const INITIAL_VIEW_STATE = {
 export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
   const [time, setTime] = useState(0);
 
-  // Animation loop for pulsing
   useEffect(() => {
     const interval = setInterval(() => {
       setTime(t => (t + 1) % 100);
@@ -56,7 +70,6 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
           coords = COUNTRY_COORDS[code];
         }
       }
-      
       return {
         source: coords,
         target: HONEYPOT_COORD,
@@ -67,26 +80,72 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
         protocol: s.protocol || "unknown",
         score: s.threat_score || 0
       };
-    }).filter(a => Math.abs(a.source[0]) > 0.1 || Math.abs(a.source[1]) > 0.1); // Exclude [0,0] ocean null island
+    }).filter(a => Math.abs(a.source[0]) > 0.1 || Math.abs(a.source[1]) > 0.1);
   }, [sessions]);
+
+  const attackedCountries = useMemo(() => {
+    const map = new Map<string, { color: [number, number, number]; maxThreat: number }>();
+    for (const arc of arcs) {
+      const name = arc.country;
+      const existing = map.get(name);
+      if (!existing || arc.threat > existing.maxThreat) {
+        map.set(name, { color: arc.color, maxThreat: arc.threat });
+      }
+    }
+    return map;
+  }, [arcs]);
+
+  const glowAlpha = 140 + Math.floor(Math.abs(Math.sin(time / 8)) * 115);
 
   const layers = [
     new GeoJsonLayer({
-      id: "base-map",
+      id: "land-fill",
+      data: GEO_URL,
+      stroked: false,
+      filled: true,
+      extruded: false,
+      getFillColor: (d: any) => getContinentFillColor(d.properties),
+      pickable: true,
+    }),
+
+    new GeoJsonLayer({
+      id: "country-borders",
       data: GEO_URL,
       stroked: true,
-      filled: true,
-      extruded: true,
-      getElevation: (d: any) => {
+      filled: false,
+      extruded: false,
+      getLineColor: (d: any) => {
         const name = d.properties?.ADMIN || d.properties?.name || "";
-        if (name === "Antarctica") return 0;
-        return 15000;
-      }, 
-      lineWidthMinPixels: 1,
-      opacity: 0.9,
-      getLineColor: [30, 41, 59, 255],
-      getFillColor: [15, 20, 36, 255]
+        const entry = attackedCountries.get(name);
+        if (entry) {
+          return [...entry.color, 200] as [number, number, number, number];
+        }
+        return [40, 55, 75, 120] as [number, number, number, number];
+      },
+      lineWidthMinPixels: 0.5,
+      lineWidthMaxPixels: 1.5,
+      pickable: false,
     }),
+
+    new GeoJsonLayer({
+      id: "country-glow",
+      data: GEO_URL,
+      stroked: true,
+      filled: false,
+      extruded: false,
+      getLineColor: (d: any) => {
+        const name = d.properties?.ADMIN || d.properties?.name || "";
+        const entry = attackedCountries.get(name);
+        if (entry) {
+          return [...entry.color, glowAlpha] as [number, number, number, number];
+        }
+        return [0, 0, 0, 0] as [number, number, number, number];
+      },
+      lineWidthMinPixels: 2.5,
+      lineWidthMaxPixels: 5,
+      pickable: false,
+    }),
+
     new ArcLayer({
       id: "attack-arcs",
       data: arcs,
@@ -97,8 +156,9 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
       getWidth: (d: any) => (d.threat >= 3 ? 3 : 1.5),
       getHeight: 1.5,
       opacity: 0.8,
-      pickable: true
+      pickable: true,
     }),
+
     new ScatterplotLayer({
       id: "honeypot-node",
       data: [{ position: HONEYPOT_COORD }],
@@ -111,26 +171,27 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
       getRadius: 120000,
       radiusMinPixels: 4,
       radiusMaxPixels: 12,
-      parameters: { depthTest: false }
+      parameters: { depthTest: false },
     }),
+
     new ScatterplotLayer({
       id: "origin-nodes",
       data: arcs,
       getPosition: (d: any) => [d.source[0], d.source[1], 61000],
       getFillColor: (d: any) => [...d.color, 200] as [number, number, number, number],
-      getRadius: 200000 + (Math.sin(time / 8) * 60000),
+      getRadius: 200000 + Math.sin(time / 8) * 60000,
       radiusMinPixels: 6,
       radiusMaxPixels: 40,
       stroked: true,
       getLineColor: (d: any) => [...d.color, 255] as [number, number, number, number],
       lineWidthMinPixels: 2,
       pickable: false,
-      parameters: { depthTest: false }
-    })
+      parameters: { depthTest: false },
+    }),
   ];
 
   return (
-    <motion.section 
+    <motion.section
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.6, delay: 0.3 }}
@@ -142,76 +203,87 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
           <div className="w-2 h-2 bg-threat rounded-full"></div> SENSORS ONLINE
         </span>
       </div>
-      
-      <div className="flex-1 relative rounded-lg border border-border/30 overflow-hidden bg-[#0A0E1A]/90 shadow-[inset_0_0_40px_rgba(0,0,0,0.4)]">
+
+      <div className="flex-1 relative rounded-lg border border-border/30 overflow-hidden shadow-[inset_0_0_40px_rgba(0,0,0,0.4)]" style={{ backgroundColor: `rgb(${OCEAN_COLOR[0]}, ${OCEAN_COLOR[1]}, ${OCEAN_COLOR[2]})` }}>
         <div className="absolute inset-0">
           <DeckGL
             initialViewState={INITIAL_VIEW_STATE}
             controller={true}
             layers={layers}
-            getTooltip={({object}: any) => {
+            getTooltip={({ object }: any) => {
               if (!object) return null;
+              const props = object.properties || {};
+              const name = props.ADMIN || props.name;
+              if (name && !object.ip) {
+                return {
+                  html: `
+                    <div style="font-family: monospace; background: rgba(10, 14, 26, 0.95); border: 1px solid rgba(255,255,255,0.1); padding: 10px 14px; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.8); backdrop-filter: blur(10px);">
+                      <div style="color: #e2e8f0; font-size: 12px; font-weight: bold;">${name}</div>
+                      <div style="color: #64748b; font-size: 10px; margin-top: 2px;">${props.CONTINENT || ""}</div>
+                    </div>
+                  `,
+                  style: {
+                    backgroundColor: "transparent",
+                    padding: "0px",
+                    pointerEvents: "none" as const,
+                  },
+                };
+              }
               return {
                 html: `
                   <div style="font-family: monospace; background: rgba(10, 14, 26, 0.95); border: 1px solid rgba(230, 57, 70, 0.3); padding: 12px; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.8); backdrop-filter: blur(10px); min-width: 200px;">
                     <div style="color: #64748b; font-size: 10px; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 1px;">Ingress Telemetry</div>
-                    
                     <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
                       <span style="color: #94a3b8; font-size: 12px;">Origin IP</span>
                       <span style="color: #f8fafc; font-weight: bold; font-size: 12px;">${object.ip}</span>
                     </div>
-                    
                     <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
                       <span style="color: #94a3b8; font-size: 12px;">Location</span>
                       <span style="color: #f8fafc; font-size: 12px;">${object.country} [${object.source[1].toFixed(2)}, ${object.source[0].toFixed(2)}]</span>
                     </div>
-
                     <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
                       <span style="color: #94a3b8; font-size: 12px;">Protocol</span>
                       <span style="color: rgba(46, 196, 182, 1); font-weight: bold; text-transform: uppercase; font-size: 12px;">${object.protocol}</span>
                     </div>
-
                     <div style="display: flex; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
                       <span style="color: #94a3b8; font-size: 12px;">Threat Score</span>
-                      <span style="color: ${object.threat >= 3 ? 'rgba(230, 57, 70, 1)' : 'rgba(233, 196, 106, 1)'}; font-weight: bold; font-size: 12px;">
+                      <span style="color: ${object.threat >= 3 ? "rgba(230, 57, 70, 1)" : "rgba(233, 196, 106, 1)"}; font-weight: bold; font-size: 12px;">
                         ${(object.score * 100).toFixed(1)}% (Lvl ${object.threat})
                       </span>
                     </div>
                   </div>
                 `,
                 style: {
-                  backgroundColor: 'transparent',
-                  padding: '0px',
-                  pointerEvents: 'none' as const
-                }
+                  backgroundColor: "transparent",
+                  padding: "0px",
+                  pointerEvents: "none" as const,
+                },
               };
             }}
           />
         </div>
-        {/* Futuristic Overlay Grid */}
-        <div className="absolute inset-0 pointer-events-none mix-blend-overlay opacity-10" style={{ backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px)', backgroundSize: '40px 40px'}}></div>
+        <div className="absolute inset-0 pointer-events-none mix-blend-overlay opacity-10" style={{ backgroundImage: "linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px)", backgroundSize: "40px 40px" }}></div>
       </div>
-      
-      {/* Legend */}
+
       <div className="absolute bottom-6 left-6 space-y-2 pointer-events-none z-10 glass px-4 py-3 rounded-[10px] border border-white/10 shadow-[0_0_30px_rgba(0,0,0,0.5)]">
         <div className="flex items-center gap-3">
-          <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(230,57,70,1)]" style={{ backgroundColor: "rgba(230,57,70,1)"}}></div>
+          <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(230,57,70,1)]" style={{ backgroundColor: "rgba(230,57,70,1)" }}></div>
           <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 4 · CRITICAL</span>
         </div>
         <div className="flex items-center gap-3">
-          <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(244,162,97,1)]" style={{ backgroundColor: "rgba(244,162,97,1)"}}></div>
+          <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(244,162,97,1)]" style={{ backgroundColor: "rgba(244,162,97,1)" }}></div>
           <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 3 · HIGH</span>
         </div>
         <div className="flex items-center gap-3">
-          <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(233,196,106,1)]" style={{ backgroundColor: "rgba(233,196,106,1)"}}></div>
+          <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(233,196,106,1)]" style={{ backgroundColor: "rgba(233,196,106,1)" }}></div>
           <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 2 · MODERATE</span>
         </div>
         <div className="flex items-center gap-3">
-          <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(46,196,182,1)]" style={{ backgroundColor: "rgba(46,196,182,1)"}}></div>
+          <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(46,196,182,1)]" style={{ backgroundColor: "rgba(46,196,182,1)" }}></div>
           <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 1 · EASY</span>
         </div>
         <div className="flex items-center gap-3">
-          <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(107,114,128,1)]" style={{ backgroundColor: "rgba(107,114,128,1)"}}></div>
+          <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(107,114,128,1)]" style={{ backgroundColor: "rgba(107,114,128,1)" }}></div>
           <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 0 · BENIGN</span>
         </div>
       </div>
