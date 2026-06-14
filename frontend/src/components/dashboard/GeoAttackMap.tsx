@@ -6,8 +6,8 @@ import type { SessionLog } from "../../types";
 
 const GEO_URL = "https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_110m_admin_0_countries.geojson";
 
-// Honeypot hardcoded internal coordinate (e.g., central US)
-const HONEYPOT_COORD: [number, number] = [-95.7129, 37.0902];
+// Honeypot coordinate (Egypt – Cairo)
+const HONEYPOT_COORD: [number, number] = [31.2357, 30.0444];
 
 // Fallback coords
 const COUNTRY_COORDS: Record<string, [number, number]> = {
@@ -18,16 +18,16 @@ const COUNTRY_COORDS: Record<string, [number, number]> = {
 };
 
 function getThreatColorRgb(level: number): [number, number, number] {
-  if (level >= 4) return [230, 57, 70]; // threat
-  if (level === 3) return [244, 162, 97]; // warning
-  if (level === 2) return [233, 196, 106]; 
-  if (level === 1) return [46, 196, 182]; // safe
-  return [107, 114, 128]; // text-muted
+  if (level >= 4) return [230, 57, 70]; // critical - red
+  if (level === 3) return [244, 162, 97]; // high - orange
+  if (level === 2) return [233, 196, 106]; // moderate - yellow
+  if (level === 1) return [46, 196, 182]; // easy - teal
+  return [107, 114, 128]; // benign/unknown - grey
 }
 
 const INITIAL_VIEW_STATE = {
-  longitude: 0,
-  latitude: 20,
+  longitude: 31,
+  latitude: 28,
   zoom: 1.5,
   maxZoom: 16,
   pitch: 55,
@@ -47,13 +47,14 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
 
   const arcs = useMemo(() => {
     return sessions.slice(0, 150).map(s => {
-      // Prioritize raw latitude/longitude from backend VPNService
-      let coords: [number, number] = [0, 0];
-      if (s.longitude !== undefined && s.latitude !== undefined && s.latitude !== 0) {
+      let coords: [number, number] = HONEYPOT_COORD;
+      if (s.longitude != null && s.latitude != null && (s.latitude !== 0 || s.longitude !== 0)) {
         coords = [s.longitude, s.latitude];
       } else {
         const code = (s.country || "").toUpperCase();
-        coords = COUNTRY_COORDS[code] || [0, 0];
+        if (code && COUNTRY_COORDS[code]) {
+          coords = COUNTRY_COORDS[code];
+        }
       }
       
       return {
@@ -68,12 +69,6 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
       };
     }).filter(a => Math.abs(a.source[0]) > 0.1 || Math.abs(a.source[1]) > 0.1); // Exclude [0,0] ocean null island
   }, [sessions]);
-
-  // Compute points for the Scatterplot
-  const originPoints = arcs.map(a => ({
-    position: a.source,
-    color: a.color,
-  }));
 
   const layers = [
     new GeoJsonLayer({
@@ -98,36 +93,38 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
       getSourcePosition: (d: any) => d.source,
       getTargetPosition: (d: any) => d.target,
       getSourceColor: (d: any) => d.color,
-      getTargetColor: [230, 57, 70], // Honeypot is red-targeted
+      getTargetColor: (d: any) => d.color,
       getWidth: (d: any) => (d.threat >= 3 ? 3 : 1.5),
       getHeight: 1.5,
       opacity: 0.8,
       pickable: true
     }),
     new ScatterplotLayer({
-      id: "origin-nodes",
-      data: originPoints,
-      getPosition: (d: any) => [d.position[0], d.position[1], 60000], // Elevate above base map
-      getFillColor: (d: any) => [d.color[0], d.color[1], d.color[2], Math.max(0, 150 - (time * 1.5))] as [number, number, number, number],
-      getRadius: () => 150000 + (time * 10000), // Larger pulsing radius
-      radiusMinPixels: 4,
-      radiusMaxPixels: 35,
-      stroked: false,
-      pickable: false,
-      parameters: { depthTest: false } // ensure points aren't submerged
-    }),
-    // Honeypot central node
-    new ScatterplotLayer({
       id: "honeypot-node",
       data: [{ position: HONEYPOT_COORD }],
-      getPosition: (d: any) => [d.position[0], d.position[1], 60000],
-      getFillColor: [230, 57, 70, 140], // Translucent base
-      getLineColor: [230, 57, 70, 200],
-      lineWidthMinPixels: 2,
+      getPosition: (d: any) => [d.position[0], d.position[1], 59000],
+      getFillColor: [0, 0, 0, 0],
+      getLineColor: [200, 200, 200, 100],
+      lineWidthMinPixels: 1,
       stroked: true,
-      getRadius: 300000 + (Math.sin(time / 10) * 80000), // Larger Radar pulse
-      radiusMinPixels: 8,
-      radiusMaxPixels: 45,
+      filled: false,
+      getRadius: 120000,
+      radiusMinPixels: 4,
+      radiusMaxPixels: 12,
+      parameters: { depthTest: false }
+    }),
+    new ScatterplotLayer({
+      id: "origin-nodes",
+      data: arcs,
+      getPosition: (d: any) => [d.source[0], d.source[1], 61000],
+      getFillColor: (d: any) => [...d.color, 200] as [number, number, number, number],
+      getRadius: 200000 + (Math.sin(time / 8) * 60000),
+      radiusMinPixels: 6,
+      radiusMaxPixels: 40,
+      stroked: true,
+      getLineColor: (d: any) => [...d.color, 255] as [number, number, number, number],
+      lineWidthMinPixels: 2,
+      pickable: false,
       parameters: { depthTest: false }
     })
   ];
@@ -199,15 +196,23 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
       <div className="absolute bottom-6 left-6 space-y-2 pointer-events-none z-10 glass px-4 py-3 rounded-[10px] border border-white/10 shadow-[0_0_30px_rgba(0,0,0,0.5)]">
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(230,57,70,1)]" style={{ backgroundColor: "rgba(230,57,70,1)"}}></div>
-          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">CRITICAL INGRESS</span>
+          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 4 · CRITICAL</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(244,162,97,1)]" style={{ backgroundColor: "rgba(244,162,97,1)"}}></div>
-          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">HIGH THREAT</span>
+          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 3 · HIGH</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(233,196,106,1)]" style={{ backgroundColor: "rgba(233,196,106,1)"}}></div>
+          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 2 · MODERATE</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(46,196,182,1)]" style={{ backgroundColor: "rgba(46,196,182,1)"}}></div>
-          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">BASIC PROBE</span>
+          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 1 · EASY</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(107,114,128,1)]" style={{ backgroundColor: "rgba(107,114,128,1)"}}></div>
+          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 0 · BENIGN</span>
         </div>
       </div>
     </motion.section>

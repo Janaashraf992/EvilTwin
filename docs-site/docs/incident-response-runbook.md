@@ -10,11 +10,13 @@ slug: /incident-response-runbook
 This runbook tells SOC analysts exactly what to do, in order, when EvilTwin raises an alert. Each playbook has copy-pasteable commands so you can act quickly without having to remember syntax under pressure.
 
 :::note Before you start
-Make sure you have a valid JWT token in your environment:
+Make sure you have a valid JWT token in your environment. The backend uses **form-encoded OAuth2 login** with the user's **email** as `username`:
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "analyst", "password": "YourPassword"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "username=analyst@eviltwin.local" \
+  --data-urlencode "password=eviltwin-demo" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 echo "Token acquired: ${TOKEN:0:20}..."
 ```
 :::
@@ -99,7 +101,7 @@ curl http://localhost:8080/stats/flow/1
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8000/sessions?src_ip=$SRC_IP&page_size=50" | python3 -m json.tool
+  "http://localhost:8000/sessions?ip=$SRC_IP&page_size=50" | python3 -m json.tool
 ```
 
 ### Step 5: Export evidence for SIEM/ticketing
@@ -126,9 +128,9 @@ curl -X POST http://localhost:8000/ai/chat \
 
 ## Playbook 2: Canary Token Triggered (Any Level)
 
-**What is a canary token?** A unique, tracked identifier embedded in a file, email, URL, or document. When an attacker accesses the asset (opens the file, clicks the URL), a webhook fires back to EvilTwin automatically — even if they never hit your honeypots.
+**What is a canary token?** A canary token (also called a **honeytoken**) is the third honeypot type in EvilTwin. Unlike Cowrie and Dionaea which are network services, a canary is a tracked artifact — a fake credential, document, URL, AWS key, or DNS record planted somewhere an attacker is likely to find it. When the attacker uses the artifact, a webhook fires back to EvilTwin even if they never touched a honeypot service.
 
-**Signs**: Alert shows `source: canary_webhook`, not a honeypot sensor.
+**Signs**: Alert message starts with `Canary token triggered:` and the session `honeypot` field equals `canary` (protocol `http`). The alert is created at threat level 3 by default.
 
 ### Step 1: Validate the webhook alert is authentic
 
@@ -218,7 +220,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/score/203.0.113.1
 
 # Get all sessions from specific IP
 curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8000/sessions?src_ip=203.0.113.1&page_size=50"
+  "http://localhost:8000/sessions?ip=203.0.113.1&page_size=50"
 
 # AI analysis of a session
 curl -X POST http://localhost:8000/ai/analyze \

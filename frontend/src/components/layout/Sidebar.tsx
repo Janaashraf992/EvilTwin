@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { 
   LayoutDashboard, 
   Activity, 
+  Crosshair,
   ShieldAlert,
   Settings,
   Shield,
@@ -13,6 +14,7 @@ import { useAuthStore } from "../../store/authStore";
 const navItems = [
   { path: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { path: "/sessions", label: "Sessions", icon: Activity },
+  { path: "/canary", label: "Canary Tokens", icon: Crosshair },
   { path: "/threat-intel", label: "Threat Intel", icon: ShieldAlert },
   { path: "/settings", label: "Settings", icon: Settings }
 ];

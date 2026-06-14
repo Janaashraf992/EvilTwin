@@ -6,26 +6,36 @@ This guide covers everything an operator needs to run EvilTwin: bootstrapping th
 
 ## Understanding the Service Topology
 
-EvilTwin is a multi-service application orchestrated with Docker Compose. Here is how the services relate to each other:
+EvilTwin is a multi-service application orchestrated with Docker Compose. Three deception sources feed one backend, which serves the dashboard and the SDN controller. Cowrie and Dionaea write JSON logs to **shared Docker volumes**; the backend tails those volumes. Canary tokens use an HTTP webhook instead.
 
 ```mermaid
 flowchart LR
-    subgraph Deception Network
-        COW[Cowrie Honeypot<br/>Ports 22+23]
-        DIO[Dionaea Honeypot<br/>Ports 445+80+21]
+    subgraph Deception["Deception Network (deception-net)"]
+        COW["Cowrie Honeypot<br/>SSH :2222"]
+        DIO["Dionaea Honeypot<br/>FTP :21 · HTTP :80<br/>SMB :445 · MSSQL :1433"]
     end
-    subgraph Management Network
-        BE[FastAPI Backend<br/>Port 8000]
-        PG[(PostgreSQL<br/>Port 5432)]
-        RYU[Ryu SDN Controller<br/>Port 6633+8080]
-        FE[React Frontend<br/>Port 5173 dev / 80 prod]
+    subgraph External["External Canary Sources"]
+        CAN["Canary Tokens<br/>(honeytokens)"]
+    end
+    subgraph Volumes["Shared Volumes"]
+        CLOG[(cowrie-logs)]
+        DLOG[(dionaea-logs)]
+    end
+    subgraph Management["Management Network (eviltwin-net)"]
+        BE["FastAPI Backend<br/>:8000<br/>(log tailers + REST)"]
+        PG[(PostgreSQL<br/>:5432)]
+        RYU["Ryu SDN Controller<br/>:6633 + :8080"]
+        FE["React Frontend<br/>:3000"]
     end
 
-    COW -->|POST /log| BE
-    DIO -->|POST /log| BE
+    COW -->|"writes cowrie.json"| CLOG
+    DIO -->|"writes dionaea.json"| DLOG
+    CLOG -->|"tailed by backend"| BE
+    DLOG -->|"tailed by backend"| BE
+    CAN -->|"POST /webhook/canary (HMAC)"| BE
     BE <--> PG
-    FE <-->|REST + WebSocket| BE
-    RYU -->|GET /score/ip| BE
+    FE <-->|"REST + WebSocket"| BE
+    RYU -->|"GET /score/{ip}"| BE
 ```
 
 :::warning Important: Network Isolation
@@ -115,26 +125,27 @@ curl -I http://localhost:8000/
 ### Step 6: Create Your First User Account
 
 ```bash
-# Register an admin user
+# Register an analyst account (the backend uses email-based auth)
 curl -X POST http://localhost:8000/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "StrongPass123!", "role": "admin"}'
+  -d '{"email": "admin@eviltwin.local", "password": "StrongPass123!", "role": "admin"}'
 
-# Log in to receive a JWT access token
+# Log in to receive a JWT access token (form-encoded, OAuth2-password style)
 curl -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "StrongPass123!"}'
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "username=admin@eviltwin.local" \
+  --data-urlencode "password=StrongPass123!"
 # Save the "access_token" from the response — you will need it for API calls
 ```
 
 ### Step 7: Validate Ingestion and Scoring
 
-Simulate a honeypot event to verify the full pipeline works:
+In production, Cowrie and Dionaea events flow in automatically as the honeypots write JSON to shared volumes — the backend tails those files. To smoke-test ingestion without waiting for an attacker, you can post a synthetic event to the internal `/log` endpoint:
 
 ```bash
 TOKEN="your_access_token_here"
 
-# Send a test event
+# Send a synthetic honeypot event (the same shape the tailers produce)
 curl -X POST http://localhost:8000/log \
   -H "Content-Type: application/json" \
   -d '{
@@ -142,7 +153,7 @@ curl -X POST http://localhost:8000/log \
     "dst_ip": "10.0.1.10",
     "protocol": "ssh",
     "sensor_id": "cowrie-test",
-    "timestamp": "2024-01-15T10:00:00Z",
+    "timestamp": "2026-01-15T10:00:00Z",
     "payload": {"event": "login_attempt", "username": "root", "password": "admin"}
   }'
 
@@ -288,7 +299,7 @@ For horizontal scaling (multiple backend containers), a load balancer is require
 | 1. Check backend logs for errors | `docker compose logs backend --tail=200` |
 | 2. Verify migrations are applied | `docker compose exec backend alembic current` |
 | 3. Query with broad date range | `curl "http://localhost:8000/sessions?page=1&page_size=25"` |
-| 4. Check database directly | `docker compose exec postgres psql -U eviltwin -c "SELECT COUNT(*) FROM sessions;"` |
+| 4. Check database directly | `docker compose exec postgres psql -U eviltwin -c "SELECT COUNT(*) FROM session_logs;"` |
 
 ### Runbook B: SDN Not Redirecting Suspicious Traffic
 

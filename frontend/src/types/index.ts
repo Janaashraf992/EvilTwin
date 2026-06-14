@@ -52,6 +52,8 @@ export interface DashboardStats {
   total_sessions_24h: number;
   unique_attackers_24h: number;
   critical_alerts_24h: number;
+  canary_triggers_24h: number;
+  honeypot_breakdown: Array<{ honeypot: string; count: number }>;
   top_commands: Array<{ command: string; count: number }>;
   attacks_by_hour: Array<{ hour: number; count: number }>;
   threat_level_distribution: Array<{ level: number; count: number }>;

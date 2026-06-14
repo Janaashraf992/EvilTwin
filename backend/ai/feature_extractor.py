@@ -43,7 +43,7 @@ def _duration_seconds(start_time: datetime | None, end_time: datetime | None) ->
         start_time = start_time.replace(tzinfo=timezone.utc)
     if end.tzinfo is None:
         end = end.replace(tzinfo=timezone.utc)
-    return max((end - start_time).total_seconds(), 0.0)
+    return max((end - start_time).total_seconds(), 5.0)
 
 
 def extract_features(session: Any, profile: Any, multi_protocol: bool = False, known_bad_ip: bool = False) -> list[float]:
@@ -64,7 +64,7 @@ def extract_features(session: Any, profile: Any, multi_protocol: bool = False, k
     start_time = getattr(session, "start_time", None)
     end_time = getattr(session, "end_time", None)
     duration = _duration_seconds(start_time, end_time)
-    commands_per_minute = float(cmd_count / max(duration / 60.0, 1e-6)) if cmd_count else 0.0
+    commands_per_minute = min(float(cmd_count / max(duration / 60.0, 1e-6) if cmd_count else 0.0), 300.0)
 
     st = start_time or datetime.now(timezone.utc)
     if st.tzinfo is None:

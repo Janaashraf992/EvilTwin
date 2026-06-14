@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Sidebar } from "./components/layout/Sidebar";
 import { TopBar } from "./components/layout/TopBar";
 import { ProtectedRoute } from "./components/layout/ProtectedRoute";
+import { Canary } from "./pages/Canary";
 import { Dashboard } from "./pages/Dashboard";
 import { Sessions } from "./pages/Sessions";
 import { Settings } from "./pages/Settings";
@@ -42,6 +43,7 @@ export default function App() {
             <Route element={<AppShell />}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/sessions" element={<Sessions />} />
+              <Route path="/canary" element={<Canary />} />
               <Route path="/threat-intel" element={<ThreatIntel />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />

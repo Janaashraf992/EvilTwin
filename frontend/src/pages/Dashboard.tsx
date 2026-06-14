@@ -7,7 +7,7 @@ import { StatCard } from "../components/dashboard/StatCard";
 import { ThreatFeed } from "../components/dashboard/ThreatFeed";
 import { ThreatLevelGauge } from "../components/dashboard/ThreatLevelGauge";
 import { TopAttackerTable } from "../components/dashboard/TopAttackerTable";
-import { Activity, ShieldAlert, Users, Network } from "lucide-react";
+import { Activity, ShieldAlert, Users } from "lucide-react";
 
 const container = {
   hidden: { opacity: 0 },
@@ -36,11 +36,10 @@ export function Dashboard() {
       initial="hidden"
       animate="show"
     >
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <motion.div variants={item}><StatCard label="Sessions 24h" value={stats?.total_sessions_24h ?? 0} icon={<Activity size={20} />} /></motion.div>
         <motion.div variants={item}><StatCard label="Unique IPs" value={stats?.unique_attackers_24h ?? 0} icon={<Users size={20} />} /></motion.div>
         <motion.div variants={item}><StatCard label="Critical Alerts" value={stats?.critical_alerts_24h ?? 0} icon={<ShieldAlert size={20} className="text-threat" />} /></motion.div>
-        <motion.div variants={item}><StatCard label="VPN Users" value={sessions.filter((s) => s.vpn_detected).length} icon={<Network size={20} />} /></motion.div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -49,7 +48,7 @@ export function Dashboard() {
           <TopAttackerTable sessions={sessions} />
         </motion.div>
         <motion.div variants={item} className="space-y-4 flex flex-col h-full">
-          <ThreatLevelGauge level={Math.max(...(sessions.map((s) => s.threat_level) || [0]))} />
+          <ThreatLevelGauge level={sessions.length > 0 ? Math.max(...sessions.map((s) => s.threat_level)) : 0} />
           <div className="flex-grow min-h-0">
              <ThreatFeed />
           </div>

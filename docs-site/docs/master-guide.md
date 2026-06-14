@@ -21,41 +21,51 @@ EvilTwin addresses this by creating **controlled adversarial interaction surface
 
 ## Platform in One Paragraph
 
-EvilTwin captures attacker interactions in honeypots, enriches and stores those events in a backend API, scores threat severity with a machine learning model, surfaces real-time context to SOC analysts via a web dashboard, enables an AI assistant to explain threats in natural language, and optionally triggers SDN-based traffic redirection for the most dangerous sources.
+EvilTwin captures attacker interactions across three honeypot types — Cowrie (SSH), Dionaea (FTP/HTTP/SMB/MSSQL), and canary tokens (honeytokens) — ingests those events into a FastAPI backend (by tailing the honeypots' JSON logs from shared Docker volumes and by receiving HMAC-signed canary webhooks), stores everything in PostgreSQL, scores threat severity with a scikit-learn model, surfaces real-time context to SOC analysts via a React dashboard over WebSockets, enables an LLM-powered assistant to explain threats in natural language, and exposes a `GET /score/{ip}` endpoint that the Ryu SDN controller polls to install OpenFlow redirection rules for the most dangerous sources.
 
 ## End-to-End Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Deception
-        COW[Cowrie SSH/Telnet]
-        DIO[Dionaea SMB/HTTP]
+    subgraph Deception["Deception — 3 Honeypots"]
+        COW["Cowrie<br/>SSH :2222"]
+        DIO["Dionaea<br/>FTP/HTTP/SMB/MSSQL"]
+        CAN["Canary Tokens<br/>(honeytokens)"]
     end
-    subgraph Platform
-        BE[FastAPI Backend]
+    subgraph Volumes["Shared Docker Volumes"]
+        CLOG[(cowrie-logs<br/>cowrie.json)]
+        DLOG[(dionaea-logs<br/>dionaea.json)]
+    end
+    subgraph Platform["Backend Platform"]
+        TAIL["Log Tailers<br/>watch_cowrie / watch_dionaea"]
+        BE["FastAPI Backend"]
         DB[(PostgreSQL)]
-        ML[ML Threat Scorer]
-        LLM[LLM AI Assistant]
-        AM[Alert Manager]
+        ML["ML Threat Scorer"]
+        LLM["LLM AI Assistant"]
+        AM["Alert Manager"]
     end
-    subgraph Control
-        SDN[Ryu SDN Controller]
-        SW[OpenFlow Switches]
+    subgraph Control["Control Plane"]
+        SDN["Ryu SDN Controller"]
+        SW["OpenFlow Switches"]
     end
-    subgraph Visibility
-        FE[React SOC Dashboard]
+    subgraph Visibility["SOC Visibility"]
+        FE["React Dashboard"]
     end
 
-    COW -->|POST /log| BE
-    DIO -->|POST /log| BE
+    COW -->|"writes JSON"| CLOG
+    DIO -->|"writes JSON"| DLOG
+    CLOG --> TAIL
+    DLOG --> TAIL
+    TAIL --> BE
+    CAN -->|"POST /webhook/canary<br/>(HMAC)"| BE
     BE <--> DB
     BE --> ML
     BE --> LLM
     ML --> DB
     BE --> AM
-    AM -->|WebSocket| FE
-    FE -->|REST + WS| BE
-    SDN -->|GET /score/ip| BE
+    AM -->|"WebSocket /ws/alerts"| FE
+    FE -->|"REST + WS"| BE
+    SDN -->|"GET /score/{ip}"| BE
     SDN --> SW
 ```
 
@@ -72,34 +82,40 @@ flowchart LR
 
 ## The Core Data Flow — Step by Step
 
-Here is exactly what happens when an attacker connects to a honeypot:
+Here is exactly what happens when an attacker interacts with one of the three honeypots:
 
 ```mermaid
 sequenceDiagram
     participant A as Attacker
-    participant H as Honeypot
-    participant B as Backend API
+    participant H as Honeypot<br/>(Cowrie / Dionaea / Canary)
+    participant V as Shared Volume<br/>(JSON logs)
+    participant T as Backend Log Tailer<br/>(or /webhook/canary)
     participant DB as PostgreSQL
     participant ML as Threat Scorer
-    participant LLM as AI Assistant
-    participant SDN as SDN Controller
-    participant WS as WebSocket
+    participant AM as Alert Manager
+    participant SDN as Ryu SDN
     participant UI as SOC Dashboard
+    participant LLM as AI Assistant
 
-    A->>H: 1. Connects to fake SSH port 22
-    H->>B: 2. POST /log — structured event JSON
-    B->>DB: 3. Upsert attacker profile + session record
-    B->>ML: 4. Score session features + profile history
-    ML-->>B: 5. threat_score=0.87, threat_level=3
-    B->>DB: 6. Persist threat fields
-    B->>WS: 7. Broadcast alert (level >= threshold)
-    WS-->>UI: 8. Real-time alert appears on dashboard
-    SDN->>B: 9. Polling GET /score/attacker_ip
-    B-->>SDN: 10. Returns threat_level=3
-    SDN->>SW: 11. Install OpenFlow redirect rule
-    Note over A,SW: Attacker silently redirected back to honeypot
-    UI->>LLM: 12. Analyst requests POST /ai/analyze for this session
-    LLM-->>UI: 13. Plain-English explanation + TTPs + IoCs + recommendations
+    A->>H: 1. Connects to fake service<br/>or trips a canary token
+    alt Cowrie / Dionaea
+        H->>V: 2a. Append JSON event to log file
+        V->>T: 3a. Tailer reads new line
+    else Canary token
+        H->>T: 2b. POST /webhook/canary (HMAC-signed)
+    end
+    T->>DB: 4. Upsert attacker_profile<br/>+ insert session_log
+    T->>ML: 5. Score session features + profile history
+    ML-->>T: 6. threat_score=0.87, threat_level=3
+    T->>DB: 7. Persist threat fields, insert alert if level >= 3
+    T->>AM: 8. Broadcast alert
+    AM-->>UI: 9. Real-time alert via WebSocket /ws/alerts
+    SDN->>T: 10. Poll GET /score/{attacker_ip}
+    T-->>SDN: 11. Returns threat_level=3
+    SDN->>SDN: 12. Install OpenFlow redirect rule
+    Note over A,SDN: Dangerous traffic kept inside the deception network
+    UI->>LLM: 13. Analyst requests POST /ai/analyze
+    LLM-->>UI: 14. Plain-English explanation + TTPs + IoCs
 ```
 
 ## Authentication and Access Control
@@ -162,16 +178,16 @@ Goal: run, harden, and monitor the stack reliably.
 | Endpoint Group | Purpose | Auth Required |
 |---|---|---|
 | `POST /auth/register` | Create a user account | No |
-| `POST /auth/login` | Get a JWT access token | No |
+| `POST /auth/login` | Get a JWT access token (form-encoded: `username`=email, `password`) | No |
 | `POST /auth/refresh` | Renew an expired access token | Refresh token |
-| `POST /log` | Ingest a honeypot event | No (internal only) |
+| `POST /log` | Ingest a honeypot event (used internally / for tests — production uses log tailers) | No (internal only) |
 | `GET /sessions` | Browse attack sessions | Yes |
 | `GET /score/{ip}` | Get threat score for an IP | Yes |
 | `GET /dashboard/stats` | Aggregated statistics | Yes |
 | `WS /ws/alerts` | Live alert stream | Yes (token param) |
 | `POST /ai/analyze` | AI analysis of a session | Yes |
 | `POST /ai/chat` | Conversational threat intel | Yes |
-| `POST /canary/webhook` | Receive canary token triggers | HMAC signature |
+| `POST /webhook/canary` | Receive canary token triggers (the 3rd honeypot) | HMAC signature |
 
 Full request/response documentation: [API Reference](/dev/api-reference).
 

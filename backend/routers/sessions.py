@@ -5,7 +5,8 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, cast, func, select
+from sqlalchemy.dialects.postgresql import INET as PG_INET
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -38,7 +39,7 @@ async def list_sessions(
     if date_to:
         filters.append(SessionLog.start_time <= date_to)
     if ip:
-        filters.append(SessionLog.attacker_ip == ip)
+        filters.append(SessionLog.attacker_ip == cast(ip, PG_INET))
 
     where_clause = and_(*filters) if filters else None
 

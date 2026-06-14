@@ -38,7 +38,7 @@ def _class_samples(rng: np.random.Generator, n: int, label: int) -> tuple[np.nda
     X[:, 3] = float(label >= 3)
     X[:, 4] = float(label >= 2)
     X[:, 5] = duration
-    X[:, 6] = cmd / (duration / 60.0)
+    X[:, 6] = rng.uniform(2, 30, size=n)
     X[:, 7] = rng.integers(0, 24, size=n)
     X[:, 8] = rng.integers(0, 2, size=n)
     X[:, 9] = rng.binomial(1, 0.1 + (0.15 * label), size=n)

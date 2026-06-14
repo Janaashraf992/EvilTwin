@@ -21,8 +21,11 @@ class SplunkForwarder:
             "index": "eviltwin",
         }
         headers = {"Authorization": f"Splunk {self.hec_token}"}
-        resp = await self.client.post(self.hec_url, json=payload, headers=headers)
-        return resp.status_code < 300
+        try:
+            resp = await self.client.post(self.hec_url, json=payload, headers=headers)
+            return resp.status_code < 300
+        except Exception:
+            return False
 
     async def close(self) -> None:
         if not self.client.is_closed:

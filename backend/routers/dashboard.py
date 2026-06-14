@@ -35,6 +35,23 @@ async def get_stats(
         )
     ).scalar_one()
 
+    canary_triggers_24h = (
+        await db.execute(
+            select(func.count(SessionLog.id)).where(
+                SessionLog.start_time >= since, SessionLog.honeypot == "canary"
+            )
+        )
+    ).scalar_one()
+
+    honeypot_rows = (
+        await db.execute(
+            select(SessionLog.honeypot, func.count(SessionLog.id).label("count"))
+            .where(SessionLog.start_time >= since)
+            .group_by(SessionLog.honeypot)
+        )
+    ).all()
+    honeypot_breakdown = [{"honeypot": row.honeypot, "count": row.count} for row in honeypot_rows]
+
     sessions = (
         await db.execute(select(SessionLog).where(SessionLog.start_time >= since).order_by(SessionLog.start_time.desc()))
     ).scalars().all()
@@ -65,6 +82,8 @@ async def get_stats(
         total_sessions_24h=total_sessions_24h,
         unique_attackers_24h=unique_attackers_24h,
         critical_alerts_24h=critical_alerts_24h,
+        canary_triggers_24h=canary_triggers_24h,
+        honeypot_breakdown=honeypot_breakdown,
         top_commands=top_commands,
         attacks_by_hour=attacks_by_hour_list,
         threat_level_distribution=threat_level_distribution,

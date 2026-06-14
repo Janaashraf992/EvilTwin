@@ -114,6 +114,28 @@ class SessionLog(Base):
         return f"<SessionLog(id={self.id}, attacker_ip={self.attacker_ip}, honeypot={self.honeypot}, commands={len(self.commands) if self.commands else 0})>"
 
 
+class CanaryToken(Base):
+    """
+    A deployed canary token (honeytoken). When triggered, the token fires a
+    webhook to POST /webhook/canary which creates a SessionLog with
+    honeypot='canary' and an alert at the token's difficulty level.
+    """
+    __tablename__ = "canary_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    label = Column(String(255), nullable=False)
+    description = Column(String(1000), nullable=True)
+    token_kind = Column(String(50), nullable=False, default="url")  # url, file, dns, aws_key, custom
+    difficulty = Column(Integer, nullable=False, default=1)  # 1=easy, 2=moderate, 3=devious
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    last_triggered_at = Column(DateTime, nullable=True)
+    trigger_count = Column(Integer, default=0, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<CanaryToken(id={self.id}, label='{self.label}', triggers={self.trigger_count})>"
+
+
 class Alert(Base):
     """
     Alert notification generated when threat level reaches high (3) or critical (4).

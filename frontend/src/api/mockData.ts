@@ -7,12 +7,19 @@ export const MOCK_SESSIONS: SessionLog[] = [
   { id: "s4", attacker_ip: "103.111.45.9", honeypot: "cowrie", protocol: "ssh", start_time: new Date(Date.now() - 900000).toISOString(), end_time: null, commands: [{ timestamp: "", command: "chmod +x drop.sh" }], credentials_tried: [], malware_hashes: [], raw_log: {}, threat_score: 0.9, threat_level: 4, country: "IR", latitude: 35.6892, longitude: 51.3890, vpn_detected: true },
   { id: "s5", attacker_ip: "91.240.118.66", honeypot: "dionaea", protocol: "smb", start_time: new Date(Date.now() - 1200000).toISOString(), end_time: null, commands: [], credentials_tried: [], malware_hashes: [], raw_log: {}, threat_score: 0.7, threat_level: 3, country: "RO", latitude: 44.4268, longitude: 26.1025, vpn_detected: false },
   { id: "s6", attacker_ip: "18.232.14.99", honeypot: "cowrie", protocol: "ssh", start_time: new Date(Date.now() - 1500000).toISOString(), end_time: null, commands: [], credentials_tried: [], malware_hashes: [], raw_log: {}, threat_score: 0.1, threat_level: 1, country: "BR", latitude: -23.5505, longitude: -46.6333, vpn_detected: false },
+  { id: "s7", attacker_ip: "77.88.21.5", honeypot: "canary", protocol: "http", start_time: new Date(Date.now() - 300000).toISOString(), end_time: new Date(Date.now() - 300000).toISOString(), commands: [], credentials_tried: [], malware_hashes: [], raw_log: { token_id: "demo-token", user_agent: "curl/7.88" }, threat_score: 0.75, threat_level: 3, country: "DE", latitude: 51.1657, longitude: 10.4515, vpn_detected: false },
 ];
 
 export const MOCK_STATS: DashboardStats = {
   total_sessions_24h: 342,
   unique_attackers_24h: 189,
   critical_alerts_24h: 24,
+  canary_triggers_24h: 3,
+  honeypot_breakdown: [
+    { honeypot: "cowrie", count: 210 },
+    { honeypot: "dionaea", count: 129 },
+    { honeypot: "canary", count: 3 },
+  ],
   top_commands: [{ command: "wget", count: 140 }, { command: "chmod", count: 90 }, { command: "curl", count: 45 }],
   attacks_by_hour: Array.from({ length: 24 }).map((_, i) => ({ hour: i, count: Math.floor(Math.random() * 50) + 10 })),
   threat_level_distribution: [{ level: 1, count: 150 }, { level: 2, count: 100 }, { level: 3, count: 50 }, { level: 4, count: 42 }]

@@ -56,10 +56,14 @@ Expected services:
 
 - `eviltwin-postgres`
 - `eviltwin-backend`
-- `eviltwin-cowrie`
-- `eviltwin-dionaea`
+- `eviltwin-cowrie` — honeypot #1 (SSH)
+- `eviltwin-dionaea` — honeypot #2 (FTP / HTTP / SMB / MSSQL)
 - `eviltwin-frontend`
 - `eviltwin-ryu`
+
+:::note Honeypot #3 — Canary tokens
+The third honeypot does not need its own container. **Canary tokens** (honeytokens) are tracked artifacts you plant in real assets (a fake AWS key, document, URL, DNS record, etc.). When triggered they call `POST /webhook/canary` on the backend with an HMAC signature derived from `CANARY_WEBHOOK_SECRET`. See [Incident Response Runbook — Playbook 2](./incident-response-runbook.md) for how alerts surface in the dashboard.
+:::
 
 ## Step 4 — Log In to the Dashboard
 

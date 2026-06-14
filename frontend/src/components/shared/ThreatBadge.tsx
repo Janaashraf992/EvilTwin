@@ -1,5 +1,5 @@
 const LEVELS: Record<number, { label: string; classes: string }> = {
-  0: { label: "Unknown", classes: "bg-slate-500" },
+  0: { label: "None", classes: "bg-slate-500" },
   1: { label: "Low", classes: "bg-sky-500" },
   2: { label: "Medium", classes: "bg-amber-500" },
   3: { label: "High", classes: "bg-orange-500" },

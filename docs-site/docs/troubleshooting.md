@@ -19,13 +19,14 @@ docker compose ps
 **Meaning**: Your request is missing a valid JWT token, the token has expired, or the signature no longer matches.
 
 **Cause 1: Token expired (most common)**
-JWT access tokens expire after 30 minutes by default. Your frontend should refresh them automatically via `POST /auth/refresh`. If you are using curl manually, you need to fetch a new token.
+JWT access tokens expire after 30 minutes by default. Your frontend should refresh them automatically via `POST /auth/refresh`. If you are using curl manually, you need to fetch a new token. The backend uses **form-encoded** OAuth2 login with email as `username`:
 
 ```bash
 # Re-authenticate to get a fresh token
 curl -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "YourPassword"}'
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "username=analyst@eviltwin.local" \
+  --data-urlencode "password=YourPassword"
 # Copy the new access_token value
 ```
 
@@ -117,7 +118,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 # Step 3: Check database directly for any sessions
 docker compose exec postgres psql -U eviltwin eviltwin \
-  -c "SELECT COUNT(*), MIN(first_seen), MAX(first_seen) FROM sessions;"
+  -c "SELECT COUNT(*), MIN(start_time), MAX(start_time) FROM session_logs;"
 ```
 
 If the database query returns 0 rows, run `alembic upgrade head` — the schema migration may not have been applied.

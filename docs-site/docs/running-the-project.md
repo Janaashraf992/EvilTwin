@@ -117,6 +117,14 @@ docker compose up --build -d
 
 This builds five custom images (backend, frontend, ryu, cowrie, dionaea) and pulls postgres and splunk-forwarder. First build takes 2–5 minutes depending on your internet speed.
 
+:::note Three honeypots, two containers
+EvilTwin supports three honeypot types:
+
+1. **Cowrie** — SSH service honeypot (its own container, port `2222`)
+2. **Dionaea** — multi-protocol service honeypot (its own container, ports `2121` / `8081` / `1445` / `11433`)
+3. **Canary tokens** — lightweight asset-based honeypots (no container; they call `POST /webhook/canary` on the backend with HMAC authentication via `CANARY_WEBHOOK_SECRET`)
+:::
+
 Watch the startup progress:
 
 ```bash

@@ -96,11 +96,24 @@ async def lifespan(_: FastAPI):
 settings = get_settings()
 app = FastAPI(title="EvilTwin Backend API", version="0.2.0", lifespan=lifespan)
 
-allowed_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+_raw_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+# If the only origins listed are the default localhost entries, allow all origins
+# so the dashboard works from any LAN browser without extra configuration.
+_localhost_only = all(
+    o.startswith("http://localhost") or o.startswith("https://localhost")
+    for o in _raw_origins
+)
+if _localhost_only:
+    allowed_origins = ["*"]
+    _allow_credentials = False  # credentials cannot be used with wildcard origin
+else:
+    allowed_origins = _raw_origins
+    _allow_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

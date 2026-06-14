@@ -9,21 +9,12 @@ COPY . .
 RUN npm run build
 
 # ---- Production stage ----
-FROM node:20-alpine
+FROM nginx:alpine
 
-WORKDIR /app
+COPY --from=builder /app/dist /usr/share/nginx/html
 
-RUN addgroup -S eviltwin && adduser -S eviltwin -G eviltwin
-
-COPY --from=builder /app/package.json .
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/vite.config.js .
-
-RUN chown -R eviltwin:eviltwin /app
-
-USER eviltwin
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 3000
 
-CMD ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["nginx", "-g", "daemon off;"]

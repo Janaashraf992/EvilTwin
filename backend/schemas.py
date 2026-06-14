@@ -6,17 +6,17 @@ from datetime import datetime
 from typing import Optional, List
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, IPvAnyAddress
+from pydantic import BaseModel, ConfigDict, IPvAnyAddress
 
 # --- Auth Schemas ---
 
 class UserCreate(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 class UserResponse(BaseModel):
     id: UUID
-    email: EmailStr
+    email: str
     is_active: bool
     role: str
     created_at: datetime
@@ -36,7 +36,7 @@ class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 # --- Platform Schemas ---
@@ -137,6 +137,8 @@ class StatsResponse(BaseModel):
     total_sessions_24h: int
     unique_attackers_24h: int
     critical_alerts_24h: int
+    canary_triggers_24h: int
+    honeypot_breakdown: List[dict]  # [{honeypot, count}]
     top_commands: List[dict]
     attacks_by_hour: List[dict]
     threat_level_distribution: List[dict]
@@ -149,6 +151,36 @@ class CanaryWebhookRequest(BaseModel):
     src_ip: IPvAnyAddress
     user_agent: Optional[str] = None
     signature: str
+
+
+class CanaryTokenCreate(BaseModel):
+    """Request body to create a new canary token."""
+    label: str
+    description: Optional[str] = None
+    token_kind: str = "url"  # url, file, dns, aws_key, custom
+    difficulty: int = 1  # 1=easy, 2=moderate, 3=devious
+
+
+class CanaryTokenResponse(BaseModel):
+    """Canary token details returned by the API."""
+    id: UUID
+    label: str
+    description: Optional[str]
+    token_kind: str
+    difficulty: int
+    created_at: datetime
+    last_triggered_at: Optional[datetime]
+    trigger_count: int
+    is_active: bool
+    webhook_url: str  # computed field — the URL to configure in canarytokens.org or similar
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CanaryTokenListResponse(BaseModel):
+    """Paginated list of canary tokens."""
+    items: List[CanaryTokenResponse]
+    total: int
 
 
 # --- LLM / AI Analysis Schemas ---

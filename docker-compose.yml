@@ -116,6 +116,8 @@ services:
       DEMO_USER_EMAIL: ${DEMO_USER_EMAIL:-analyst@eviltwin.local}
       DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-eviltwin-demo}
       DEMO_USER_ROLE: ${DEMO_USER_ROLE:-analyst}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - cowrie-logs:/logs/cowrie:ro
       - dionaea-logs:/logs/dionaea:ro
@@ -156,21 +158,47 @@ services:
         condition: service_healthy
 
   # ============================================================================
-  # Splunk Universal Forwarder
+  # Splunk Universal Forwarder (disabled - use HEC via backend instead)
+  # To re-enable, uncomment below or see splunk/ directory for config files.
   # ============================================================================
-  splunk-forwarder:
-    image: splunk/universalforwarder:latest
-    container_name: eviltwin-splunk-fwd
+  # splunk-forwarder:
+  #   build:
+  #     context: ./splunk
+  #   container_name: eviltwin-splunk-fwd
+  #   privileged: true
+  #   environment:
+  #     SPLUNK_START_ARGS: "--accept-license"
+  #     SPLUNK_GENERAL_TERMS: "--accept-sgt-current-at-splunk-com"
+  #     SPLUNK_PASSWORD: ${SPLUNK_HEC_TOKEN:-changeme123}
+  #     SPLUNK_HOME_OWNERSHIP_ENFORCEMENT: "false"
+  #   volumes:
+  #     - cowrie-logs:/cowrie/var/log/cowrie:ro
+  #   networks:
+  #     - eviltwin-net
+  #   restart: unless-stopped
+
+  # ============================================================================
+  # Tripwire Service - Bait files exposed via HTTP + inotify file watcher
+  # ============================================================================
+  tripwire:
+    build: ./tripwires
+    container_name: eviltwin-tripwire
+    ports:
+      - "8082:8080"
     environment:
-      SPLUNK_START_ARGS: "--accept-license"
-      SPLUNK_GENERAL_TERMS: "--accept-sgt-current-at-splunk-com"
-      SPLUNK_PASSWORD: ${SPLUNK_HEC_TOKEN:-changeme123}
+      CANARY_WEBHOOK_URL: http://backend:8000/webhook/canary
+      CANARY_WEBHOOK_SECRET: ${CANARY_WEBHOOK_SECRET}
+      CANARY_TOKEN_ID: ${TRIPWIRE_TOKEN_ID:-}
+      WATCH_DIR: /bait
+      COOLDOWN_SECONDS: "30"
+      TRIPWIRE_HTTP_PORT: "8080"
     volumes:
-      - cowrie-logs:/cowrie/var/log/cowrie:ro
-      - ./splunk/inputs.conf:/opt/splunkforwarder/etc/system/local/inputs.conf:ro
-      - ./splunk/outputs.conf:/opt/splunkforwarder/etc/system/local/outputs.conf:ro
+      - ./tripwires/bait:/bait
     networks:
       - eviltwin-net
+    depends_on:
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
 # ============================================================================

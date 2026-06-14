@@ -20,23 +20,36 @@ When an attacker discovers what looks like your SSH server or file share and con
 
 ```mermaid
 flowchart TD
-    A["🎣 Deception Layer\nHoneypots — Cowrie SSH, Dionaea"] -->|"JSON events via POST /log"| B
-    B["📥 Ingestion Layer\nFastAPI Backend"] -->|"upsert sessions & profiles"| C
-    C["🗄️ Intelligence Layer\nPostgreSQL · ML Scoring · LLM Analysis"]
+    subgraph Deception["🎣 Deception Layer — 3 Honeypots"]
+        COW["Cowrie<br/>SSH on port 2222"]
+        DIO["Dionaea<br/>FTP / HTTP / SMB / MSSQL"]
+        CAN["Canary Tokens<br/>(honeytokens)"]
+    end
+
+    COW -->|"writes cowrie.json\nto shared volume"| B
+    DIO -->|"writes dionaea.json\nto shared volume"| B
+    CAN -->|"POST /webhook/canary\n(HMAC-signed)"| B
+
+    B["📥 Ingestion Layer<br/>FastAPI Backend tails JSON logs"] -->|"upsert sessions & profiles"| C
+    C["🗄️ Intelligence Layer<br/>PostgreSQL · ML Scoring · LLM Analysis"]
     C -->|"GET /score/ip"| D
-    D["🌐 Control Layer\nRyu SDN Controller"] -->|"OpenFlow rule install"| E
-    E["🔀 Network Layer\nOpenFlow Switches"]
+    D["🌐 Control Layer<br/>Ryu SDN Controller"] -->|"OpenFlow rule install"| E
+    E["🔀 Network Layer<br/>OpenFlow Switches"]
     C -->|"WebSocket broadcast"| F
-    F["👁️ Visibility Layer\nReact SOC Dashboard"]
+    F["👁️ Visibility Layer<br/>React SOC Dashboard"]
 ```
 
 | Layer | Purpose | Key Technology |
 |---|---|---|
-| **Deception** | Presents fake services to attract attackers | Cowrie (SSH/Telnet), Dionaea (SMB/HTTP) |
-| **Ingestion** | Receives, validates, and persists attack events | FastAPI, PostgreSQL, Pydantic |
+| **Deception** | Presents fake services and tracked assets to attract attackers | Cowrie (SSH), Dionaea (FTP/HTTP/SMB/MSSQL), Canary tokens (honeytokens) |
+| **Ingestion** | Tails honeypot JSON logs and receives canary webhooks; validates and persists events | FastAPI, async file tailers, PostgreSQL, Pydantic |
 | **Intelligence** | Scores threat severity and explains attacker intent | scikit-learn ML, OpenAI-compatible LLM |
 | **Control** | Redirects dangerous traffic to contain attackers | Ryu OpenFlow controller |
 | **Visibility** | Shows analysts live and historical threat context | React, Zustand, WebSockets |
+
+:::note What is a canary token?
+A **canary token** (or **honeytoken**) is a lightweight honeypot in the form of a tracked artifact — a fake credential, document, URL, API key, or DNS record. The attacker never sees it as a service; they trip it by *using* the planted artifact. When triggered, the token fires an HMAC-signed webhook to `POST /webhook/canary`, which EvilTwin treats as a high-confidence intrusion signal (threat level 3).
+:::
 
 ## Key Concepts Glossary
 
@@ -45,6 +58,7 @@ New to security platforms? These terms appear constantly throughout the docs.
 | Term | What It Means in Plain English |
 |---|---|
 | **Honeypot** | A fake-but-convincing service (SSH server, SMB share) that records everything attackers do |
+| **Canary Token / Honeytoken** | A tracked artifact (file, credential, URL, DNS record) that fires an alert when accessed — a lightweight, asset-based honeypot |
 | **SOC** | Security Operations Center — the team or dashboard where analysts monitor threats in real time |
 | **SDN** | Software Defined Networking — programming network switches in software rather than configuring them by hand |
 | **OpenFlow** | A protocol that lets you tell a network switch exactly how to handle each packet |

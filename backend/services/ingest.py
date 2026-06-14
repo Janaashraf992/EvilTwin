@@ -102,8 +102,8 @@ async def ingest_event(
     else:
         score, level = 0.0, 0
 
-    profile.threat_score = score
-    profile.threat_level = level
+    profile.threat_score = max(score, profile.threat_score or 0.0)
+    profile.threat_level = max(level, profile.threat_level or 0)
 
     if level >= 3:
         alert = Alert(
@@ -128,11 +128,21 @@ async def ingest_event(
         if runtime_state.alert_manager:
             await runtime_state.alert_manager.broadcast(alert_data)
 
-        if runtime_state.splunk_forwarder:
-            await runtime_state.splunk_forwarder.send_event(
-                {**alert_data, "raw_log": payload.model_dump(mode="json")},
-                source="eviltwin-ingest",
-            )
+    # Forward every event to Splunk regardless of threat level
+    if runtime_state.splunk_forwarder:
+        event_data = {
+            "session_id": str(session.id),
+            "attacker_ip": src_ip,
+            "honeypot": session.honeypot,
+            "protocol": session.protocol,
+            "threat_score": score,
+            "threat_level": level,
+            "event": payload.model_dump(mode="json"),
+        }
+        await runtime_state.splunk_forwarder.send_event(
+            event_data,
+            source=f"eviltwin-{session.honeypot}",
+        )
 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     if elapsed_ms > 2000:

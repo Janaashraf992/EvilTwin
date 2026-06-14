@@ -1,6 +1,7 @@
 import { useWebSocket } from "../../hooks/useWebSocket";
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? "ws://localhost:8000/ws/alerts";
+const WS_URL = import.meta.env.VITE_WS_URL ??
+  `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:8000/ws/alerts`;
 
 export function TopBar() {
   const { connected, lastPing, retryCount, nextRetryInMs, lastError } = useWebSocket(WS_URL);
