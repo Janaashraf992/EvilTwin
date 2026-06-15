@@ -170,7 +170,7 @@ export function Canary() {
 
   const tokens = tokenData?.items ?? [];
   const canarySessions = sessionsData?.items ?? [];
-  const totalTriggers = tokens.reduce((sum, t) => sum + t.trigger_count, 0);
+  const totalTriggers = tokens.reduce((sum: number, t: CanaryToken) => sum + t.trigger_count, 0);
 
   return (
     <div className="space-y-6">
@@ -191,7 +191,7 @@ export function Canary() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           { label: "Total Tokens", value: tokens.length },
-          { label: "Active", value: tokens.filter((t) => t.is_active).length },
+          { label: "Active", value: tokens.filter((t: CanaryToken) => t.is_active).length },
           { label: "Total Triggers", value: totalTriggers },
           { label: "Sessions", value: canarySessions.length },
         ].map((card) => (
@@ -219,7 +219,7 @@ export function Canary() {
           </div>
         ) : (
           <div className="space-y-3">
-            {tokens.map((token) => (
+            {tokens.map((token: CanaryToken) => (
               <TokenRow key={token.id} token={token} />
             ))}
           </div>

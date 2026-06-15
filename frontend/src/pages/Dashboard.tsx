@@ -8,6 +8,7 @@ import { ThreatFeed } from "../components/dashboard/ThreatFeed";
 import { ThreatLevelGauge } from "../components/dashboard/ThreatLevelGauge";
 import { TopAttackerTable } from "../components/dashboard/TopAttackerTable";
 import { Activity, ShieldAlert, Users } from "lucide-react";
+import type { SessionLog } from "../types";
 
 const container = {
   hidden: { opacity: 0 },
@@ -48,7 +49,7 @@ export function Dashboard() {
           <TopAttackerTable sessions={sessions} />
         </motion.div>
         <motion.div variants={item} className="space-y-4 flex flex-col h-full">
-          <ThreatLevelGauge level={sessions.length > 0 ? Math.max(...sessions.map((s) => s.threat_level)) : 0} />
+          <ThreatLevelGauge level={sessions.length > 0 ? Math.max(...sessions.map((s: SessionLog) => s.threat_level)) : 0} />
           <div className="flex-grow min-h-0">
              <ThreatFeed />
           </div>
