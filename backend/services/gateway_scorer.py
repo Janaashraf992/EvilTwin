@@ -34,6 +34,7 @@ async def classify_connection(
 
     # ---- DB: check reconnect + store temporary session entry ----
     is_reconnect = False
+    subnet_ip_count = 0
     session_id = None
     profile_was_new = False
     profile = None
@@ -69,6 +70,23 @@ async def classify_connection(
             ).order_by(SessionLog.start_time.desc()).limit(1)
         )
         recent_gateway = result.scalar_one_or_none()
+
+        # Subnet scan: distinct IPs in same /24 within 60s
+        subnet_ip_count = 0
+        try:
+            import ipaddress
+            net = ipaddress.ip_network(payload.src_ip + "/24", strict=False)
+            from sqlalchemy import text
+            subnet_result = await db.execute(
+                text(
+                    "SELECT COUNT(DISTINCT attacker_ip) FROM session_logs "
+                    "WHERE attacker_ip << :cidr AND start_time >= :since"
+                ),
+                {"cidr": str(net), "since": window_start},
+            )
+            subnet_ip_count = (await subnet_result.scalar()) or 0
+        except Exception:
+            pass
 
         # Get or create AttackerProfile
         result = await db.execute(
@@ -125,9 +143,12 @@ async def classify_connection(
 
         # ---- Extract rich signals from payload (feeds both ML and LLM) ----
         signals = _extract_signals(payload, is_reconnect)
+        signals["is_known_scanner_ip"] = 1.0 if is_known_scanner(payload.src_ip) else 0.0
+        signals["is_tor"] = 0.0
+        signals["subnet_ip_count"] = float(subnet_ip_count)
 
         # ---- Tier 2: ML always runs (independent verification) ----
-        ml_level, ml_confidence, ml_decision = _run_ml_tier(signals)
+        ml_level, ml_confidence, ml_decision = _run_pre_session_ml(signals)
 
         # ---- Tier 3: Arbitrate — compare rule recommendation vs ML verdict ----
         decision, confidence, arbitrate_reason, verdict = _arbitrate(
@@ -194,6 +215,13 @@ def _extract_signals(payload: GatewayScoreRequest, is_reconnect: bool) -> dict:
     now = datetime.now(CAIRO_TZ)
     unique_usernames = list({u.lower() for u in payload.usernames_tried})
 
+    # Password analysis
+    passwords = getattr(payload, "passwords_tried", []) or []
+    entropy = _password_entropy(passwords)
+    has_common = 1.0 if any(_is_common_password(p) for p in passwords) else 0.0
+    repeating = 1.0 if len(passwords) >= 2 and len(set(passwords)) < len(passwords) else 0.0
+    rotating = 1.0 if len(passwords) >= 2 and len(set(passwords)) == len(passwords) else 0.0
+
     return {
         "src_ip": payload.src_ip,
         "src_port": payload.src_port,
@@ -225,6 +253,11 @@ def _extract_signals(payload: GatewayScoreRequest, is_reconnect: bool) -> dict:
             else 0.0
         ),
         "is_rapid_reconnect": 1.0 if is_reconnect else 0.0,
+        # Password analysis
+        "avg_password_entropy": entropy,
+        "has_common_password": has_common,
+        "repeating_password": repeating,
+        "rotating_passwords": rotating,
         # Temporal
         "hour_of_day": float(now.hour),
         "is_weekend": 1.0 if now.weekday() >= 5 else 0.0,
@@ -265,9 +298,12 @@ def _run_heuristic_rules(
     ):
         return ("real", 0.92, "publickey auth with clean username")
 
-    # ---- RULE 6: Publickey + Suspicious Username ----
+    # ---- RULE 6: Publickey + Suspicious Username + Bot Signal ----
     if payload.public_key_attempted:
-        return ("honeypot", 0.88, "publickey auth but suspicious username")
+        fast_interval = payload.auth_attempt_interval > 0 and payload.auth_attempt_interval < 0.5
+        fast_connect = payload.time_to_first_auth > 0 and payload.time_to_first_auth < 0.15
+        if fast_interval or fast_connect or is_reconnect:
+            return ("honeypot", 0.88, "publickey + suspicious username + bot behavior")
 
     # ---- RULE 7: Credential Spray (≥4 attempts) ----
     if payload.auth_attempts_count >= 4:
@@ -352,49 +388,59 @@ def _run_heuristic_rules(
 
 
 # ---------------------------------------------------------------------------
-# Tier 2: ML verification (always runs)
+# Tier 2: ML verification — VotingClassifier (LogisticRegression + GradientBoost)
 # ---------------------------------------------------------------------------
 
-def _run_ml_tier(signals: dict) -> tuple[int, float, str]:
-    if app_state.threat_scorer is None or app_state.threat_scorer.pipeline is None:
+PRE_SESSION_FEATURE_ORDER = [
+    "auth_attempts_count",
+    "unique_username_count",
+    "suspicious_username_count",
+    "time_to_first_auth",
+    "auth_attempt_interval",
+    "public_key_attempted",
+    "shell_requested",
+    "is_interactive",
+    "has_exec_command",
+    "suspicious_exec",
+    "safe_exec",
+    "is_deprecated_client",
+    "is_rapid_reconnect",
+    "auth_method_count",
+    "hour_of_day",
+    "is_weekend",
+    "is_known_scanner_ip",
+    "is_tor",
+    "avg_password_entropy",
+    "has_common_password",
+    "repeating_password",
+    "rotating_passwords",
+    "subnet_ip_count",
+]
+
+
+def _run_pre_session_ml(signals: dict) -> tuple[int, float, str]:
+    if app_state.pre_session_model is None:
         return (-1, 0.0, "")
 
     try:
         import numpy as np
 
         feature_vector = [
-            signals.get("auth_attempts_count", 0),           # cmd_count proxy
-            signals.get("unique_username_count", 0) / 10.0,  # unique_cmd_ratio proxy
-            signals.get("has_exec_command", 0.0),             # download_attempt proxy
-            signals.get("suspicious_exec", 0.0),              # priv_escalation proxy
-            1.0 if signals.get("auth_attempts_count", 0) >= 4 else 0.0,  # credential_spray
-            max(signals.get("time_to_first_auth", 5.0), 5.0),  # session_duration_s
-            max(signals.get("auth_attempts_count", 0) / max(signals.get("time_to_first_auth", 1.0), 1.0), 0.0) * 60.0,  # commands_per_minute proxy
-            signals.get("hour_of_day", 12),                    # hour_of_day
-            signals.get("is_weekend", 0.0),                    # is_weekend
-            0.0,                                              # vpn_detected (post-session only)
-            signals.get("is_deprecated_client", 0.0),          # known_bad_ip proxy
-            signals.get("suspicious_username_count", 0),       # recon_commands proxy
-            signals.get("suspicious_exec", 0.0),               # persistence_attempt proxy
-            signals.get("suspicious_exec", 0.0),               # data_exfil_attempt proxy
-            0.0,                                              # malware_dropped (post-session only)
-            signals.get("auth_method_count", 0) > 1 and 1.0 or 0.0,  # multi_protocol proxy
-            0.0,                                              # canary_triggered (post-session only)
-            0.0,                                              # canary_max_difficulty
-            0.0,                                              # canary_trigger_count
-            0.0,                                              # cumulative_canary_score
-            0.0,                                              # seconds_since_last_event
+            float(signals.get(name, 0))
+            for name in PRE_SESSION_FEATURE_ORDER
         ]
 
-        pipeline = app_state.threat_scorer.pipeline
-        probabilities = pipeline.predict_proba(np.array([feature_vector]))[0]
-        level = int(pipeline.predict(np.array([feature_vector]))[0])
-        confidence = float(max(probabilities))
-        decision = "honeypot" if level >= 2 else "real"
+        model = app_state.pre_session_model
+        proba = model.predict_proba(np.array([feature_vector], dtype=np.float64))[0]
+        # proba[0] = honeypot, proba[1] = real
+        confidence = float(max(proba))
+        is_real = proba[1] >= 0.5
+        decision = "real" if is_real else "honeypot"
+        level = 0 if is_real else 4
 
         return (level, confidence, decision)
     except Exception as exc:
-        logger.debug("ML pre-session scoring failed: %s", exc)
+        logger.debug("Pre-session ML scoring failed: %s", exc)
         return (-1, 0.0, "")
 
 
@@ -452,6 +498,24 @@ def _arbitrate(
             "inconclusive",
         )
 
+    # ---- ML strongly overrides weak heuristic (R6 false-positive bypass) ----
+    if rule_decision == "honeypot" and ml_decision == "real" and ml_confidence >= 0.85:
+        return (
+            ml_decision,
+            ml_confidence,
+            f"ML overrides heuristic — {rule_reason} but ML sees real patterns (conf={ml_confidence:.2f})",
+            "decided",
+        )
+
+    # ---- Rules strongly overrule ML (whitelist / high-confidence rules) ----
+    if rule_decision == "real" and rule_confidence >= 0.95:
+        return (
+            rule_decision,
+            rule_confidence,
+            f"Rules overrule ML — high-confidence real ({rule_reason})",
+            "decided",
+        )
+
     # ---- Disagree → inconclusive, need more signals + LLM ----
     return (
         "inconclusive",
@@ -478,33 +542,47 @@ async def _run_llm_tier(
     if app_state.llm_service is None:
         return None
 
-    try:
-        signal_lines = [
-            f"Source IP: {payload.src_ip}:{payload.src_port}",
-            f"Client: {payload.client_version or 'unknown'}",
-            f"KEX fingerprint: {payload.kex_algorithms_hash or 'unknown'}",
-            f"Time to first auth: {payload.time_to_first_auth:.3f}s",
-            f"Auth attempts: {payload.auth_attempts_count}",
-            f"Auth interval: {payload.auth_attempt_interval:.3f}s",
-            f"Auth methods: {', '.join(payload.auth_methods_used) or 'password'}",
-            f"Usernames: {', '.join(payload.usernames_tried[:10]) if payload.usernames_tried else 'none'}",
-            f"Publickey attempted: {payload.public_key_attempted}",
-            f"Session type: {'interactive shell' if payload.shell_requested else 'exec: ' + (payload.exec_command or 'none')}",
-            f"Interactive: {payload.is_interactive}",
-            "",
-            f"Heuristic recommendation: {rule_decision} (confidence: {rule_confidence:.2f})",
-            f"Heuristic reason: {rule_reason}",
-            f"ML verdict: {ml_decision} (level={ml_level}, confidence={ml_confidence:.2f})" if ml_level >= 0 else "ML: not available",
-            "",
-            "Heuristic and ML are inconclusive or disagree. You are the final arbiter.",
-            "Classify this connection as 'real' or 'honeypot'. Return JSON only.",
-        ]
-        prompt = "\n".join(signal_lines)
+    for retry in range(2):
+        try:
+            signal_lines = [
+                f"Source IP: {payload.src_ip}:{payload.src_port}",
+                f"Client: {payload.client_version or 'unknown'} (deprecated: {bool(signals.get('is_deprecated_client'))})",
+                f"KEX fingerprint: {payload.kex_algorithms_hash or 'unknown'}",
+                f"Time to first auth: {payload.time_to_first_auth:.3f}s",
+                f"Auth attempts: {payload.auth_attempts_count}",
+                f"Auth interval: {payload.auth_attempt_interval:.3f}s",
+                f"Auth methods: {', '.join(payload.auth_methods_used) or 'password'} (count: {signals.get('auth_method_count', 1)})",
+                f"Usernames: {', '.join(payload.usernames_tried[:10]) if payload.usernames_tried else 'none'}",
+                f"  Suspicious usernames: {int(signals.get('suspicious_username_count', 0))} of {signals.get('unique_username_count', 0)}",
+                f"Publickey attempted: {payload.public_key_attempted}",
+                f"Session type: {'interactive shell' if payload.shell_requested else 'exec: ' + (payload.exec_command or 'none')}",
+                f"  Suspicious exec: {bool(signals.get('suspicious_exec'))} | Safe exec: {bool(signals.get('safe_exec'))}",
+                f"Interactive: {payload.is_interactive}",
+                f"Rapid reconnect: {bool(signals.get('is_rapid_reconnect'))}",
+                f"Known scanner IP: {bool(signals.get('is_known_scanner_ip'))}",
+                f"Subnet IPs in 60s: {int(signals.get('subnet_ip_count', 0))}",
+                f"Hour: {int(signals.get('hour_of_day', 12))} (weekend: {bool(signals.get('is_weekend'))})",
+                "",
+                f"Heuristic recommendation: {rule_decision} (confidence: {rule_confidence:.2f})",
+                f"Heuristic reason: {rule_reason}",
+                f"ML verdict: {ml_decision} (level={ml_level}, confidence={ml_confidence:.2f})" if ml_level >= 0 else "ML: not available",
+                "",
+                "Heuristic and ML are inconclusive or disagree. You are the final arbiter.",
+                "Classify this connection as 'real' or 'honeypot'. Return JSON only.",
+            ]
+            prompt = "\n".join(signal_lines)
 
-        result = await app_state.llm_service.classify_connection(prompt)
-        return result
-    except Exception as exc:
-        logger.warning("LLM gateway classification failed: %s", exc)
+            result = await app_state.llm_service.classify_connection(prompt)
+            if result and result.get("decision") in ("real", "honeypot"):
+                return result
+            if retry < 1:
+                import asyncio as _asyncio
+                await _asyncio.sleep(1.5)
+        except Exception as exc:
+            logger.warning("LLM tier attempt %d failed: %s", retry + 1, exc)
+            if retry < 1:
+                import asyncio as _asyncio
+                await _asyncio.sleep(1.5)
 
     return None
 
@@ -554,3 +632,38 @@ def _is_service_account(payload: GatewayScoreRequest, settings) -> bool:
             if p and p.lower() in u.lower():
                 return True
     return False
+
+
+_COMMON_PASSWORDS = {
+    "", "password", "123456", "12345678", "admin", "root", "1234", "qwerty",
+    "letmein", "welcome", "monkey", "dragon", "master", "123456789",
+    "password1", "12345", "1234567890", "111111", "abc123", "pass",
+    "test", "guest", "user", "ubuntu", "debian", "changeme", "default",
+}
+
+
+def _is_common_password(pw: str) -> bool:
+    return pw.lower().strip() in _COMMON_PASSWORDS or len(pw) < 4
+
+
+def _password_entropy(passwords: list[str]) -> float:
+    if not passwords:
+        return 0.0
+    scores = []
+    for pw in passwords:
+        if not pw:
+            scores.append(0.0)
+        elif pw.lower().strip() in _COMMON_PASSWORDS:
+            scores.append(0.05)
+        else:
+            has_upper = any(c.isupper() for c in pw)
+            has_lower = any(c.islower() for c in pw)
+            has_digit = any(c.isdigit() for c in pw)
+            has_special = any(not c.isalnum() for c in pw)
+            variety = sum([has_upper, has_lower, has_digit, has_special])
+            length_bonus = min(len(pw) / 12.0, 1.0)
+            score = (variety / 4.0) * 0.7 + length_bonus * 0.3
+            if pw.isdigit():
+                score *= 0.3
+            scores.append(score)
+    return round(sum(scores) / len(scores), 3)

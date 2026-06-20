@@ -30,6 +30,7 @@ ENV PATH=/home/eviltwin/.local/bin:$PATH
 USER eviltwin
 
 RUN python -m ai.train
+RUN python -m ai.train_pre_session
 
 EXPOSE 8000
 

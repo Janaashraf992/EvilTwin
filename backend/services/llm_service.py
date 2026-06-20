@@ -110,12 +110,17 @@ class LLMService:
         )
         content = response.choices[0].message.content or ""
         import json, re
-        match = re.search(r"\{[^{}]*\}", content, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
-                pass
+        # Try full content first (handles nested JSON)
+        try:
+            return json.loads(content.strip())
+        except json.JSONDecodeError:
+            # Fallback: extract first flat JSON object
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    pass
         return {"decision": "honeypot", "user_type": "unknown", "confidence": 0.50, "explanation": "LLM parsing failed"}
 
     async def analyze_session(

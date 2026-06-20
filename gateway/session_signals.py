@@ -75,8 +75,6 @@ class SessionSignals:
     def ready(self) -> bool:
         if self._decision_made:
             return True
-        if self.public_key_attempted:
-            return True
         if self.auth_attempts_count >= 3:
             return True
         if self.shell_requested or self.exec_command:
@@ -116,6 +114,7 @@ class SessionSignals:
             "auth_attempts_count": self.auth_attempts_count,
             "auth_methods_used": self.auth_methods_used,
             "usernames_tried": self.usernames_tried,
+            "passwords_tried": self.passwords_tried,
             "public_key_attempted": self.public_key_attempted,
             "shell_requested": self.shell_requested,
             "exec_command": self.exec_command,

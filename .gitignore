@@ -127,11 +127,14 @@ pgdata/
 # ML Models & Data
 # =========================
 backend/ai/model.pkl
+backend/ai/pre_session_model.pkl
 *.pkl
 *.h5
 *.onnx
 *.weights
 *.pt
+# CatBoost training artifacts
+catboost_info/
 
 # =========================
 # Database & SQL

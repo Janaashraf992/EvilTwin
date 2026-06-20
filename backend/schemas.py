@@ -233,6 +233,7 @@ class GatewayScoreRequest(BaseModel):
     auth_attempts_count: int = 0
     auth_methods_used: list[str] = []
     usernames_tried: list[str] = []
+    passwords_tried: list[str] = []
     public_key_attempted: bool = False
     shell_requested: bool = False
     exec_command: Optional[str] = None

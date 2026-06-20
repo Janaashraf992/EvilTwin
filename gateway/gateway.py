@@ -71,7 +71,7 @@ class GatewaySession(asyncssh.SSHServerSession):
             try:
                 await asyncio.wait_for(
                     asyncio.shield(self._server._score_task),
-                    timeout=AUTH_COLLECT_WINDOW_S + 3.0,
+                    timeout=30.0,
                 )
             except (asyncio.TimeoutError, Exception):
                 pass
@@ -313,20 +313,21 @@ class GatewayServer(asyncssh.SSHServer):
         assert self._signals is not None
 
         # ---- First attempt ----
-        result = await self._score_call(attempt=1)
+        result = await self._score_call(attempt=1, timeout=BACKEND_TIMEOUT)
         decision = result["decision"]
 
         # ---- If inconclusive, wait for more signals, then second attempt ----
         if decision == "inconclusive":
-            logger.info(
-                "%s — inconclusive on first pass, waiting for more signals (window=%ss)",
-                self._signals.src_ip, AUTH_COLLECT_WINDOW_S,
-            )
-            deadline = time.monotonic() + AUTH_COLLECT_WINDOW_S
-            while time.monotonic() < deadline:
-                await asyncio.sleep(0.3)
-                if self._signals.ready:
-                    break
+            if not self._signals.ready:
+                logger.info(
+                    "%s — inconclusive on first pass, waiting for more signals (window=%ss)",
+                    self._signals.src_ip, AUTH_COLLECT_WINDOW_S,
+                )
+                deadline = time.monotonic() + AUTH_COLLECT_WINDOW_S
+                while time.monotonic() < deadline:
+                    await asyncio.sleep(0.3)
+                    if self._signals.ready:
+                        break
 
             logger.info(
                 "%s — second pass with %d auth_attempts, %d usernames",
@@ -334,7 +335,7 @@ class GatewayServer(asyncssh.SSHServer):
                 self._signals.auth_attempts_count,
                 len(self._signals.usernames_tried),
             )
-            result = await self._score_call(attempt=2)
+            result = await self._score_call(attempt=2, timeout=18.0)
 
             if result["decision"] == "inconclusive":
                 result["decision"] = "honeypot"
@@ -356,7 +357,7 @@ class GatewayServer(asyncssh.SSHServer):
         logger.info(" | ".join(log_parts))
         self._signals.set_decision(decision)
 
-    async def _score_call(self, attempt: int) -> dict:
+    async def _score_call(self, attempt: int, timeout: float = BACKEND_TIMEOUT) -> dict:
         assert self._signals is not None
         payload = self._signals.to_payload()
 
@@ -367,7 +368,7 @@ class GatewayServer(asyncssh.SSHServer):
                 async with session.post(
                     f"{BACKEND_URL}/score/initial?attempt={attempt}",
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=BACKEND_TIMEOUT),
+                    timeout=aiohttp.ClientTimeout(total=timeout),
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()

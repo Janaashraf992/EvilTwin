@@ -56,6 +56,15 @@ SAFE_COMMAND_PATTERNS: list[str] = [
     r"^netstat\b",
     r"^ss\b",
     r"^ip\s+(addr|link|route)\b",
+    r"^(git|svn)\b",
+    r"^(docker|podman)\b",
+    r"^(kubectl|helm|terraform)\b",
+    r"^(rsync|scp)\b",
+    r"^(npm|yarn|pip|cargo|go)\b",
+    r"^python3?\s+-m\b",
+    r"^(make|cmake|ninja)\b",
+    r"^(systemctl|service)\s+(start|stop|restart|reload)\b",
+    r"^(deploy|release)\b",
 ]
 
 SUSPICIOUS_COMMAND_PATTERNS: list[str] = [

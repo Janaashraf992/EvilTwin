@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     THREAT_REDIRECT_THRESHOLD: int = 2
 
     MODEL_PATH: str = "/app/ai/model.pkl"
+    PRE_SESSION_MODEL_PATH: str = "/app/ai/pre_session_model.pkl"
     SCORE_CACHE_TTL: int = 300
 
     IPINFO_TOKEN: str = ""

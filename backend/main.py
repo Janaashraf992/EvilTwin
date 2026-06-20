@@ -30,6 +30,7 @@ async def lifespan(_: FastAPI):
     from services.llm_service import LLMService
 
     app_state.threat_scorer = ThreatScorer(settings.MODEL_PATH, settings.SCORE_CACHE_TTL)
+    app_state._load_pre_session_model(settings.PRE_SESSION_MODEL_PATH)
     app_state.vpn_detector = VPNDetector(settings.IPINFO_TOKEN, settings.ABUSEIPDB_API_KEY)
 
     if settings.SPLUNK_HEC_URL and settings.SPLUNK_HEC_TOKEN:

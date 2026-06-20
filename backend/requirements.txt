@@ -11,6 +11,7 @@ joblib==1.4.2
 numpy==2.2.0
 pandas==2.2.3
 scikit-learn==1.5.2
+catboost==1.2.10
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-jose[cryptography]==3.3.0
