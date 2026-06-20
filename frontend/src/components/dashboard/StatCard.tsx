@@ -6,9 +6,9 @@ export function StatCard({ label, value, icon }: { label: string; value: string 
     <motion.article 
       whileHover={{ y: -4, scale: 1.02, boxShadow: "0 10px 30px -10px rgba(46, 196, 182, 0.2)" }} 
       transition={{ ease: "easeOut", duration: 0.2 }}
-      className="glass-elevated rounded-xl p-5 border-white/5 hover:border-safe/30 transition-colors cursor-default group relative overflow-hidden"
+      className="glass-elevated rounded-xl p-5 border-border hover:border-safe/30 transition-colors cursor-default group relative overflow-hidden"
     >
-      <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity text-white">
+      <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity text-text-primary">
         {icon}
       </div>
       <div className="flex justify-between items-start">
@@ -17,7 +17,7 @@ export function StatCard({ label, value, icon }: { label: string; value: string 
           {icon}
         </div>
       </div>
-      <p className="mt-3 text-4xl font-display font-bold text-text-primary group-hover:text-white transition-colors tracking-tight z-10">{value}</p>
+      <p className="mt-3 text-4xl font-display font-bold text-text-primary group-hover:text-text-primary transition-colors tracking-tight z-10">{value}</p>
     </motion.article>
   );
 }

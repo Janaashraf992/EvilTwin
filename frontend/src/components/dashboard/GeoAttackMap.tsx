@@ -226,7 +226,7 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
       className="glass-elevated rounded-xl p-4 shadow-panel h-[550px] flex flex-col relative overflow-hidden group"
     >
       <div className="flex justify-between items-center mb-3 z-10">
-        <h3 className="font-display text-lg font-bold tracking-widest text-[#F1F5F9]">LIVE 3D INGRESS MAP</h3>
+        <h3 className="font-display text-lg font-bold tracking-widest text-text-primary">LIVE 3D INGRESS MAP</h3>
         <span className="animate-pulse flex items-center gap-2 text-xs text-threat font-mono bg-threat/10 px-2 py-1 rounded-md border border-threat/20">
           <div className="w-2 h-2 bg-threat rounded-full"></div> SENSORS ONLINE
         </span>
@@ -293,26 +293,26 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
         <div className="absolute inset-0 pointer-events-none mix-blend-overlay opacity-10" style={{ backgroundImage: "linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px)", backgroundSize: "40px 40px" }}></div>
       </div>
 
-      <div className="absolute bottom-6 left-6 space-y-2 pointer-events-none z-10 glass px-4 py-3 rounded-[10px] border border-white/10 shadow-[0_0_30px_rgba(0,0,0,0.5)]">
+      <div className="absolute bottom-6 left-6 space-y-2 pointer-events-none z-10 glass px-4 py-3 rounded-[10px] border border-border shadow-[0_0_30px_rgba(0,0,0,0.5)]">
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(230,57,70,1)]" style={{ backgroundColor: "rgba(230,57,70,1)" }}></div>
-          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 4 · CRITICAL</span>
+          <span className="text-[10px] text-text-muted font-mono tracking-widest font-medium">LVL 4 · CRITICAL</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(244,162,97,1)]" style={{ backgroundColor: "rgba(244,162,97,1)" }}></div>
-          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 3 · HIGH</span>
+          <span className="text-[10px] text-text-muted font-mono tracking-widest font-medium">LVL 3 · HIGH</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(233,196,106,1)]" style={{ backgroundColor: "rgba(233,196,106,1)" }}></div>
-          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 2 · MODERATE</span>
+          <span className="text-[10px] text-text-muted font-mono tracking-widest font-medium">LVL 2 · MODERATE</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(46,196,182,1)]" style={{ backgroundColor: "rgba(46,196,182,1)" }}></div>
-          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 1 · EASY</span>
+          <span className="text-[10px] text-text-muted font-mono tracking-widest font-medium">LVL 1 · EASY</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="w-1.5 h-1.5 rounded-full shadow-[0_0_8px_rgba(107,114,128,1)]" style={{ backgroundColor: "rgba(107,114,128,1)" }}></div>
-          <span className="text-[10px] text-white/70 font-mono tracking-widest font-medium">LVL 0 · BENIGN</span>
+          <span className="text-[10px] text-text-muted font-mono tracking-widest font-medium">LVL 0 · BENIGN</span>
         </div>
       </div>
     </motion.section>
