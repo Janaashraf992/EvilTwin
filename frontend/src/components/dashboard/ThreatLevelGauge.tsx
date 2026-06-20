@@ -18,12 +18,12 @@ export function ThreatLevelGauge({ level }: { level: number }) {
           <RadialBarChart innerRadius="60%" outerRadius="100%" data={data} startAngle={180} endAngle={0}>
             <PolarGrid gridType="circle" />
             <PolarAngleAxis type="number" domain={[0, 5]} tick={false} />
-            <RadialBar dataKey="value" cornerRadius={10} background={{ fill: '#141928' }} />
+            <RadialBar dataKey="value" cornerRadius={10} background={{ fill: 'var(--color-gauge-bg, #141928)' }} />
           </RadialBarChart>
         </ResponsiveContainer>
       </div>
       <p className="text-center text-sm font-mono text-text-muted mt-[-2rem]">
-        LEVEL <span className="font-bold text-white text-base">{level}</span> / 4
+        LEVEL <span className="font-bold text-text-primary text-base">{level}</span> / 4
       </p>
     </section>
   );

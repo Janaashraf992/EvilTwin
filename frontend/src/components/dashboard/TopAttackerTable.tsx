@@ -39,10 +39,10 @@ export function TopAttackerTable({ sessions }: { sessions: SessionLog[] }) {
         <table className="w-full text-left text-sm border-collapse">
           <thead>
             <tr className="text-text-muted border-b border-border/50">
-              <th className="pb-2 cursor-pointer hover:text-white" onClick={() => handleSort("attacker_ip")}>IP {sortField === "attacker_ip" && (sortDesc ? "▼" : "▲")}</th>
-              <th className="pb-2 cursor-pointer hover:text-white" onClick={() => handleSort("threat_level")}>Threat {sortField === "threat_level" && (sortDesc ? "▼" : "▲")}</th>
-              <th className="pb-2 cursor-pointer hover:text-white" onClick={() => handleSort("honeypot")}>Honeypot {sortField === "honeypot" && (sortDesc ? "▼" : "▲")}</th>
-              <th className="pb-2 cursor-pointer hover:text-white" onClick={() => handleSort("start_time")}>Last Seen {sortField === "start_time" && (sortDesc ? "▼" : "▲")}</th>
+              <th className="pb-2 cursor-pointer hover:text-text-primary" onClick={() => handleSort("attacker_ip")}>IP {sortField === "attacker_ip" && (sortDesc ? "▼" : "▲")}</th>
+              <th className="pb-2 cursor-pointer hover:text-text-primary" onClick={() => handleSort("threat_level")}>Threat {sortField === "threat_level" && (sortDesc ? "▼" : "▲")}</th>
+              <th className="pb-2 cursor-pointer hover:text-text-primary" onClick={() => handleSort("honeypot")}>Honeypot {sortField === "honeypot" && (sortDesc ? "▼" : "▲")}</th>
+              <th className="pb-2 cursor-pointer hover:text-text-primary" onClick={() => handleSort("start_time")}>Last Seen {sortField === "start_time" && (sortDesc ? "▼" : "▲")}</th>
             </tr>
           </thead>
           <tbody>

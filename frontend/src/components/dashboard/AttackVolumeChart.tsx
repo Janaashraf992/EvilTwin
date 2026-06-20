@@ -10,7 +10,7 @@ export function AttackVolumeChart({ data }: { data: Array<{ hour: number; count:
             <XAxis dataKey="hour" stroke="#6B7280" tick={{ fill: '#6B7280', fontSize: 12 }} tickMargin={10} />
             <YAxis stroke="#6B7280" tick={{ fill: '#6B7280', fontSize: 12 }} />
             <Tooltip 
-              contentStyle={{ backgroundColor: '#0F1424', borderColor: 'rgba(255,255,255,0.07)', color: '#E8EAF0' }}
+              contentStyle={{ backgroundColor: 'var(--color-tooltip-bg, #0F1424)', borderColor: 'var(--color-tooltip-border, rgba(255,255,255,0.07))', color: 'var(--color-tooltip-text, #E8EAF0)' }}
               itemStyle={{ color: '#2EC4B6' }}
             />
             <Area type="monotone" dataKey="count" stroke="#2EC4B6" fillOpacity={1} fill="url(#colorCount)" />
