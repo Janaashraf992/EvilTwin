@@ -12,7 +12,7 @@ from sklearn.preprocessing import StandardScaler
 
 from ai.feature_extractor import FEATURES
 
-N_FEATURES = 20
+N_FEATURES = 21
 
 
 def _class_samples(rng: np.random.Generator, n: int, label: int) -> tuple[np.ndarray, np.ndarray]:
@@ -24,30 +24,35 @@ def _class_samples(rng: np.random.Generator, n: int, label: int) -> tuple[np.nda
         canary_triggered = 0.0
         canary_diff = 0.0
         canary_count = 0.0
+        canary_cumulative = 0.0
     elif label == 1:
         duration = rng.uniform(30, 120, size=n)
         cmd = rng.integers(3, 11, size=n)
         canary_triggered = rng.binomial(1, 0.3, size=n).astype(float)
         canary_diff = canary_triggered * rng.integers(1, 3, size=n)
         canary_count = canary_triggered * rng.integers(1, 3, size=n)
+        canary_cumulative = canary_triggered * rng.uniform(0.05, 0.25, size=n)
     elif label == 2:
         duration = rng.uniform(120, 300, size=n)
         cmd = rng.integers(10, 31, size=n)
         canary_triggered = rng.binomial(1, 0.6, size=n).astype(float)
         canary_diff = canary_triggered * rng.integers(1, 4, size=n)
         canary_count = canary_triggered * rng.integers(1, 5, size=n)
+        canary_cumulative = canary_triggered * rng.uniform(0.15, 0.50, size=n)
     elif label == 3:
         duration = rng.uniform(300, 900, size=n)
         cmd = rng.integers(30, 81, size=n)
         canary_triggered = rng.binomial(1, 0.8, size=n).astype(float)
         canary_diff = canary_triggered * rng.integers(2, 5, size=n)
         canary_count = canary_triggered * rng.integers(2, 8, size=n)
+        canary_cumulative = canary_triggered * rng.uniform(0.30, 0.80, size=n)
     else:
         duration = rng.uniform(900, 1800, size=n)
         cmd = rng.integers(80, 140, size=n)
         canary_triggered = 1.0
         canary_diff = rng.integers(3, 5, size=n).astype(float)
         canary_count = rng.integers(5, 20, size=n).astype(float)
+        canary_cumulative = rng.uniform(0.60, 1.00, size=n)
 
     X[:, 0] = cmd
     X[:, 1] = rng.uniform(0.2, 1.0, size=n)
@@ -68,14 +73,16 @@ def _class_samples(rng: np.random.Generator, n: int, label: int) -> tuple[np.nda
     X[:, 16] = canary_triggered
     X[:, 17] = canary_diff
     X[:, 18] = canary_count
-    X[:, 19] = rng.exponential(300.0 * (5 - label) / 5, size=n)
+    X[:, 19] = canary_cumulative
+    X[:, 20] = rng.exponential(300.0 * (5 - label) / 5, size=n)
 
     X += rng.normal(0, 0.02, size=X.shape)
     X[:, 5] = np.clip(X[:, 5], 1.0, None)
     X[:, 6] = np.clip(X[:, 6], 0.0, None)
     X[:, 17] = np.clip(X[:, 17], 0.0, 4.0)
     X[:, 18] = np.clip(X[:, 18], 0.0, 50.0)
-    X[:, 19] = np.clip(X[:, 19], 0.0, 86400.0)
+    X[:, 19] = np.clip(X[:, 19], 0.0, 1.0)
+    X[:, 20] = np.clip(X[:, 20], 0.0, 86400.0)
 
     y = np.full((n,), label, dtype=int)
     return X, y

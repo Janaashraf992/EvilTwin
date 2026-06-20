@@ -6,7 +6,7 @@ from sqlalchemy.future import select
 
 from deps import get_db, get_current_user
 from models import User
-from schemas import UserCreate, UserResponse, Token, RefreshTokenRequest
+from schemas import UserCreate, UserResponse, Token, RefreshTokenRequest, UserUpdate
 from services.auth import (
     verify_password,
     get_password_hash,
@@ -92,4 +92,33 @@ async def refresh_token(body: RefreshTokenRequest, db: AsyncSession = Depends(ge
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
+    body: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if body.email is not None:
+        if not body.email.strip():
+            raise HTTPException(status_code=400, detail="Email cannot be empty.")
+        existing = await db.execute(
+            select(User).where(User.email == body.email.strip(), User.id != current_user.id)
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Email already in use.")
+        current_user.email = body.email.strip()
+
+    if body.new_password is not None:
+        if not body.current_password:
+            raise HTTPException(status_code=400, detail="Current password is required to set a new password.")
+        if not verify_password(body.current_password, current_user.hashed_password):
+            raise HTTPException(status_code=400, detail="Current password is incorrect.")
+        if len(body.new_password) < 6:
+            raise HTTPException(status_code=400, detail="New password must be at least 6 characters.")
+        current_user.hashed_password = get_password_hash(body.new_password)
+
+    await db.commit()
+    await db.refresh(current_user)
     return current_user

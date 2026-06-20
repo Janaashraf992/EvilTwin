@@ -1,6 +1,8 @@
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
+
+from config import CAIRO_TZ
 from uuid import uuid4
 
 import pytest
@@ -28,7 +30,7 @@ def test_parse_dionaea_http_accept_event_uses_verified_shape():
     assert payload.eventid == "dionaea.connection.tcp.accept"
     assert payload.protocol == "http"
     assert payload.dst_port == 80
-    assert payload.timestamp == datetime(2026, 4, 24, 17, 40, 28, 163010, tzinfo=timezone.utc)
+    assert payload.timestamp == datetime(2026, 4, 24, 17, 40, 28, 163010, tzinfo=CAIRO_TZ)
 
 
 def test_parse_dionaea_http_incident_uses_request_metadata_when_present():

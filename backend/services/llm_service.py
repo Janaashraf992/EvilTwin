@@ -84,6 +84,40 @@ class LLMService:
     async def close(self) -> None:
         await self.client.close()
 
+    async def classify_connection(
+        self,
+        signals_text: str,
+    ) -> dict[str, Any]:
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an SSH gateway classifier for an SDN cyber deception platform. "
+                        "Analyze connection signals and classify the user type. "
+                        "Return ONLY valid JSON. No markdown, no explanation outside JSON.\n"
+                        '{"decision":"real"|"honeypot","user_type":"str","confidence":0.0-1.0,"explanation":"str"}\n'
+                        "user_type must be: normal_user, scanner, pentester, "
+                        "credential_stuffer, brute_force_bot, advanced_attacker, apt_actor, unknown.\n"
+                        "explanation: 1-2 sentences for the analyst dashboard."
+                    ),
+                },
+                {"role": "user", "content": signals_text},
+            ],
+            max_tokens=200,
+            temperature=0.1,
+        )
+        content = response.choices[0].message.content or ""
+        import json, re
+        match = re.search(r"\{[^{}]*\}", content, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                pass
+        return {"decision": "honeypot", "user_type": "unknown", "confidence": 0.50, "explanation": "LLM parsing failed"}
+
     async def analyze_session(
         self,
         session: Any,

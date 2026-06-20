@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
+
+from config import CAIRO_TZ
 from pathlib import Path
 
 import pytest
@@ -26,7 +28,7 @@ async def test_ingest_single_event(integration_client):
         "dst_port": 22,
         "session": "test-ingest-001",
         "protocol": "ssh",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(CAIRO_TZ).isoformat(),
         "message": "output",
         "input": "ls -la",
     }
@@ -50,7 +52,7 @@ async def test_ingest_creates_attacker_profile(integration_client):
         "dst_port": 22,
         "session": "test-profile-001",
         "protocol": "ssh",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(CAIRO_TZ).isoformat(),
         "username": "root",
         "password": "toor",
     }
@@ -105,7 +107,7 @@ async def test_ingest_records_credentials(integration_client):
         "dst_port": 22,
         "session": "test-cred-001",
         "protocol": "ssh",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(CAIRO_TZ).isoformat(),
         "username": "admin",
         "password": "password123",
     }

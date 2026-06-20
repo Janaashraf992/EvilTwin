@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import CAIRO_TZ, cairo_iso
+
 from database import get_db
 from deps import get_current_user
-from models import Alert, SessionLog, User
+from models import Alert, AttackerProfile, SessionLog, User
 from schemas import StatsResponse
 
 router = APIRouter(prefix="/stats", tags=["dashboard"])
@@ -19,7 +21,7 @@ async def get_stats(
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ) -> StatsResponse:
-    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
+    since = datetime.now(CAIRO_TZ).replace(tzinfo=None) - timedelta(hours=24)
 
     total_sessions_24h = (
         await db.execute(select(func.count(SessionLog.id)).where(SessionLog.start_time >= since))
@@ -39,6 +41,17 @@ async def get_stats(
         await db.execute(
             select(func.count(SessionLog.id)).where(
                 SessionLog.start_time >= since, SessionLog.honeypot == "canary"
+            )
+        )
+    ).scalar_one()
+
+    vpn_users_count = (
+        await db.execute(
+            select(func.count(func.distinct(SessionLog.attacker_ip))).where(
+                SessionLog.start_time >= since,
+                SessionLog.attacker_ip.in_(
+                    select(AttackerProfile.ip).where(AttackerProfile.vpn_detected == True)
+                ),
             )
         )
     ).scalar_one()
@@ -83,6 +96,7 @@ async def get_stats(
         unique_attackers_24h=unique_attackers_24h,
         critical_alerts_24h=critical_alerts_24h,
         canary_triggers_24h=canary_triggers_24h,
+        vpn_users_count=vpn_users_count,
         honeypot_breakdown=honeypot_breakdown,
         top_commands=top_commands,
         attacks_by_hour=attacks_by_hour_list,
@@ -96,7 +110,7 @@ async def get_timeline(
     _current_user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Return attack counts per hour for the last 24 hours."""
-    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
+    since = datetime.now(CAIRO_TZ).replace(tzinfo=None) - timedelta(hours=24)
     sessions = (
         await db.execute(
             select(SessionLog.start_time)
@@ -117,7 +131,7 @@ async def get_top_attackers(
     _current_user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Return top 10 attackers by session count in the last 24 hours."""
-    since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
+    since = datetime.now(CAIRO_TZ).replace(tzinfo=None) - timedelta(hours=24)
 
     from models import AttackerProfile
 

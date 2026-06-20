@@ -15,10 +15,12 @@ class DummySession:
             {"username": "root", "password": "3", "success": False},
             {"username": "root", "password": "4", "success": False},
         ]
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
-        self.start_time = datetime.now(timezone.utc) - timedelta(minutes=4)
-        self.end_time = datetime.now(timezone.utc)
+        from config import CAIRO_TZ
+
+        self.start_time = datetime.now(CAIRO_TZ) - timedelta(minutes=4)
+        self.end_time = datetime.now(CAIRO_TZ)
         self.malware_hashes = ["deadbeef"]
 
 

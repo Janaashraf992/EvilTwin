@@ -1,11 +1,22 @@
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+CAIRO_TZ = timezone(timedelta(hours=2))
+
+
+def cairo_iso(dt: datetime | None) -> str:
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=CAIRO_TZ)
+    return dt.isoformat()
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True, extra="ignore")
 
     POSTGRES_HOST: str = "postgres"
     POSTGRES_PORT: int = 5432
@@ -62,6 +73,11 @@ class Settings(BaseSettings):
     DIONAEA_TAIL_ENABLED: bool = True
     DIONAEA_LOG_PATH: str = "/logs/dionaea/dionaea.json"
     HONEYPOT_LOG_POLL_INTERVAL_SECONDS: float = 1.0
+
+    GATEWAY_WHITELIST_CIDRS: str = ""
+    GATEWAY_COLLECT_WINDOW_S: float = 5.0
+    PENTEST_CIDRS: str = ""
+    SERVICE_ACCOUNT_USERNAME_PATTERNS: str = ""
 
     @property
     def database_url(self) -> str:

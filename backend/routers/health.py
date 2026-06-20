@@ -1,10 +1,11 @@
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import CAIRO_TZ
 from database import get_db
 from state import app_state
 
@@ -20,12 +21,14 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         db_ok = False
 
     model_ok = app_state.threat_scorer is not None and app_state.threat_scorer.pipeline is not None
-    uptime = int((datetime.now(timezone.utc) - app_state.started_at).total_seconds())
+    splunk_ok = app_state.splunk_forwarder is not None
+    uptime = int((datetime.now(CAIRO_TZ) - app_state.started_at).total_seconds())
 
     body = {
         "status": "healthy" if db_ok else "unhealthy",
         "database": db_ok,
         "model": model_ok,
+        "splunk": splunk_ok,
         "uptime": uptime,
     }
 

@@ -1,6 +1,7 @@
 import type { SessionLog } from "../../types";
 import { ThreatBadge } from "../shared/ThreatBadge";
 import { useState, useMemo } from "react";
+import { formatDateTime } from "../../utils/date";
 
 export function TopAttackerTable({ sessions }: { sessions: SessionLog[] }) {
   const [page, setPage] = useState(1);
@@ -50,7 +51,7 @@ export function TopAttackerTable({ sessions }: { sessions: SessionLog[] }) {
                 <td className="py-3 font-mono text-safe">{s.attacker_ip}</td>
                 <td className="py-3"><ThreatBadge level={s.threat_level} /></td>
                 <td className="py-3 text-text-primary/80">{s.honeypot}</td>
-                <td className="py-3 text-text-muted">{new Date(s.start_time).toLocaleString()}</td>
+                <td className="py-3 text-text-muted">{formatDateTime(s.start_time)}</td>
               </tr>
             ))}
             {paginatedRows.length === 0 && (

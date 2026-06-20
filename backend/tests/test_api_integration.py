@@ -1,7 +1,9 @@
 import uuid
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
+
+from config import CAIRO_TZ
 
 import pytest
 
@@ -28,7 +30,7 @@ async def test_log_and_sessions_and_score_endpoints(integration_client):
         "dst_port": 22,
         "session": "sess-001",
         "protocol": "ssh",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(CAIRO_TZ).isoformat(),
         "message": "cmd executed",
         "input": "whoami",
         "username": "root",
@@ -86,8 +88,8 @@ async def test_sessions_include_geo_fields(integration_client, integration_db_se
         attacker_ip="203.0.113.222",
         honeypot="cowrie",
         protocol="ssh",
-        start_time=datetime.now(timezone.utc).replace(tzinfo=None),
-        end_time=datetime.now(timezone.utc).replace(tzinfo=None),
+        start_time=datetime.now(CAIRO_TZ).replace(tzinfo=None),
+        end_time=datetime.now(CAIRO_TZ).replace(tzinfo=None),
         commands=[],
         credentials_tried=[],
         malware_hashes=[],

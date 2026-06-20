@@ -11,6 +11,7 @@ import { useSessions } from "../hooks/useSessions";
 import { SessionList } from "../components/sessions/SessionList";
 import { SessionDetail } from "../components/sessions/SessionDetail";
 import { useSession } from "../hooks/useSessions";
+import { formatDate, formatDateTime } from "../utils/date";
 
 function DifficultyBadge({ level }: { level: number }) {
   const styles: Record<number, string> = {
@@ -112,7 +113,7 @@ function TokenRow({ token }: { token: CanaryToken }) {
           <div className="text-center hidden sm:block">
             <p className="text-xs text-white/40">
               {token.last_triggered_at
-                ? new Date(token.last_triggered_at).toLocaleDateString()
+                ? formatDate(token.last_triggered_at)
                 : "Never"}
             </p>
             <p className="text-[10px] text-white/30 uppercase tracking-wider">last seen</p>
@@ -146,7 +147,7 @@ function TokenRow({ token }: { token: CanaryToken }) {
         </div>
       </div>
       <p className="mt-2 text-[10px] text-white/25">
-        Created {new Date(token.created_at).toLocaleString()} · ID: {token.id}
+        Created {formatDateTime(token.created_at)} · ID: {token.id}
       </p>
     </motion.div>
   );

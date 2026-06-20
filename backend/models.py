@@ -4,12 +4,14 @@ SQLAlchemy ORM models for EvilTwin platform.
 from sqlalchemy import Column, String, Boolean, Float, Integer, DateTime, ARRAY, ForeignKey
 from sqlalchemy.dialects.postgresql import INET, UUID, JSONB
 from sqlalchemy.orm import declarative_base, relationship
-from datetime import datetime, timezone
+from datetime import datetime
 import uuid
 
+from config import CAIRO_TZ
 
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+def _now() -> datetime:
+    return datetime.now(CAIRO_TZ).replace(tzinfo=None)
 
 Base = declarative_base()
 
@@ -25,8 +27,8 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     role = Column(String(20), nullable=False, default="analyst")  # admin, analyst, viewer
 
-    created_at = Column(DateTime, nullable=False, default=_utcnow)
-    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now, onupdate=_now)
 
     def __repr__(self):
         return f"<User(id={self.id}, email='{self.email}', is_active={self.is_active})>"
@@ -61,10 +63,11 @@ class AttackerProfile(Base):
     canary_triggered = Column(Boolean, default=False, nullable=False)
     canary_max_difficulty = Column(Integer, default=0, nullable=False)
     canary_trigger_count = Column(Integer, default=0, nullable=False)
+    cumulative_canary_score = Column(Float, default=0.0, nullable=False)  # sum of all triggered token score_values
     
     # Temporal tracking
-    first_seen = Column(DateTime, nullable=False, default=_utcnow)
-    last_seen = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+    first_seen = Column(DateTime, nullable=False, default=_now)
+    last_seen = Column(DateTime, nullable=False, default=_now, onupdate=_now)
     
     # Session tracking
     total_sessions = Column(Integer, default=0, nullable=False)
@@ -98,7 +101,7 @@ class SessionLog(Base):
     protocol = Column(String(20), nullable=False)  # 'ssh', 'http', 'ftp', etc.
     
     # Temporal data
-    start_time = Column(DateTime, nullable=False, default=_utcnow)
+    start_time = Column(DateTime, nullable=False, default=_now)
     end_time = Column(DateTime, nullable=True)
     
     # Behavioral data (JSONB for flexible structure)
@@ -132,7 +135,8 @@ class CanaryToken(Base):
     description = Column(String(1000), nullable=True)
     token_kind = Column(String(50), nullable=False, default="url")  # url, file, dns, aws_key, custom
     difficulty = Column(Integer, nullable=False, default=1)  # 1=easy, 2=moderate, 3=devious
-    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    score_value = Column(Float, nullable=False, default=0.0)  # additive threat score contribution per trigger
+    created_at = Column(DateTime, nullable=False, default=_now)
     last_triggered_at = Column(DateTime, nullable=True)
     trigger_count = Column(Integer, default=0, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
@@ -160,7 +164,7 @@ class Alert(Base):
     message = Column(String, nullable=False)
     
     # Temporal tracking
-    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    created_at = Column(DateTime, nullable=False, default=_now)
     
     # Acknowledgment fields
     acknowledged = Column(Boolean, default=False, nullable=False)

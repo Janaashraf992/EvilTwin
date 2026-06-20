@@ -2,6 +2,7 @@ import { CommandTimeline } from "./CommandTimeline";
 import { ThreatBadge } from "../shared/ThreatBadge";
 import { VpnBadge } from "../shared/VpnBadge";
 import type { SessionLog } from "../../types";
+import { formatDateTime } from "../../utils/date";
 
 export function SessionDetail({ session }: { session: SessionLog | null }) {
   if (!session) {
@@ -15,7 +16,7 @@ export function SessionDetail({ session }: { session: SessionLog | null }) {
   return (
     <section className="glass rounded-xl p-0 shadow-panel overflow-hidden flex flex-col h-full border-border/80">
       {/* Terminal Title Bar */}
-      <div className="bg-[#1c2336] px-4 py-2 flex items-center gap-3 border-b border-border/50">
+      <div className="terminal-theme px-4 py-2 flex items-center gap-3 border-b border-border/50">
         <div className="flex gap-1.5">
           <div className="w-3 h-3 rounded-full bg-[#E63946]" />
           <div className="w-3 h-3 rounded-full bg-[#E9C46A]" />
@@ -31,7 +32,7 @@ export function SessionDetail({ session }: { session: SessionLog | null }) {
           <span className="font-mono text-safe px-2 py-1 bg-safe/10 rounded-md border border-safe/20">{session.attacker_ip}</span>
         </div>
         
-        <div className="grid grid-cols-2 gap-x-8 gap-y-2 mb-6 p-4 rounded-lg bg-[#0F1424] border border-border/50 text-sm">
+        <div className="grid grid-cols-2 gap-x-8 gap-y-2 mb-6 p-4 rounded-lg card-theme border-border/50 text-sm">
           <div>
             <span className="text-text-muted uppercase text-xs tracking-wider">Honeypot</span>
             <p className="text-text-primary capitalize mt-0.5">{session.honeypot}</p>
@@ -42,7 +43,7 @@ export function SessionDetail({ session }: { session: SessionLog | null }) {
           </div>
           <div>
             <span className="text-text-muted uppercase text-xs tracking-wider">Start Time</span>
-            <p className="text-text-primary mt-0.5 font-mono text-sm">{new Date(session.start_time).toLocaleString()}</p>
+            <p className="text-text-primary mt-0.5 font-mono text-sm">{formatDateTime(session.start_time)}</p>
           </div>
           <div>
             <span className="text-text-muted uppercase text-xs tracking-wider">Threat Score</span>
@@ -50,7 +51,7 @@ export function SessionDetail({ session }: { session: SessionLog | null }) {
           </div>
         </div>
 
-        <div className="flex-1 rounded-lg overflow-hidden border border-[#2d3748]">
+        <div className="flex-1 rounded-lg overflow-hidden border border-border/30">
           <CommandTimeline commands={session.commands} />
         </div>
       </div>

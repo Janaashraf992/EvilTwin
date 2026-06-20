@@ -5,7 +5,9 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
+
+from config import CAIRO_TZ
 from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable
 
@@ -23,23 +25,23 @@ IngestHandler = Callable[[LogIngestRequest, Any, AppState], Awaitable[LogIngestR
 def _coerce_timestamp(value: Any) -> datetime:
     if isinstance(value, datetime):
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+            return value.replace(tzinfo=CAIRO_TZ)
+        return value.astimezone(CAIRO_TZ)
 
     if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value, tz=timezone.utc)
+        return datetime.fromtimestamp(value, tz=CAIRO_TZ)
 
     if isinstance(value, str):
         stripped = value.strip()
         if stripped:
             try:
-                return datetime.fromtimestamp(float(stripped), tz=timezone.utc)
+                return datetime.fromtimestamp(float(stripped), tz=CAIRO_TZ)
             except ValueError:
                 normalized = stripped.replace("Z", "+00:00")
                 parsed = datetime.fromisoformat(normalized)
                 if parsed.tzinfo is None:
-                    return parsed.replace(tzinfo=timezone.utc)
-                return parsed.astimezone(timezone.utc)
+                    return parsed.replace(tzinfo=CAIRO_TZ)
+                return parsed.astimezone(CAIRO_TZ)
 
     raise ValueError("Unsupported Cowrie timestamp")
 

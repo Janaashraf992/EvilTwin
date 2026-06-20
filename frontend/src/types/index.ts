@@ -48,6 +48,16 @@ export interface Alert {
   acknowledged: boolean;
 }
 
+export interface VpnUser {
+  ip: string;
+  city?: string;
+  country?: string;
+  isp?: string;
+  session_count: number;
+  threat_level: number;
+  last_seen?: string;
+}
+
 export interface DashboardStats {
   total_sessions_24h: number;
   unique_attackers_24h: number;

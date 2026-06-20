@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import datetime
+
+from config import CAIRO_TZ
 from typing import Any
 
 FEATURES = [
@@ -24,6 +26,7 @@ FEATURES = [
     "canary_triggered",
     "canary_max_difficulty",
     "canary_trigger_count",
+    "cumulative_canary_score",
     "seconds_since_last_event",
 ]
 
@@ -43,11 +46,11 @@ def _normalize_commands(commands: list[dict[str, Any]] | None) -> list[str]:
 def _duration_seconds(start_time: datetime | None, end_time: datetime | None) -> float:
     if not start_time:
         return 0.0
-    end = end_time or datetime.now(timezone.utc)
+    end = end_time or datetime.now(CAIRO_TZ)
     if start_time.tzinfo is None:
-        start_time = start_time.replace(tzinfo=timezone.utc)
+        start_time = start_time.replace(tzinfo=CAIRO_TZ)
     if end.tzinfo is None:
-        end = end.replace(tzinfo=timezone.utc)
+        end = end.replace(tzinfo=CAIRO_TZ)
     return max((end - start_time).total_seconds(), 5.0)
 
 
@@ -71,9 +74,9 @@ def extract_features(session: Any, profile: Any, multi_protocol: bool = False, k
     duration = _duration_seconds(start_time, end_time)
     commands_per_minute = min(float(cmd_count / max(duration / 60.0, 1e-6) if cmd_count else 0.0), 300.0)
 
-    st = start_time or datetime.now(timezone.utc)
+    st = start_time or datetime.now(CAIRO_TZ)
     if st.tzinfo is None:
-        st = st.replace(tzinfo=timezone.utc)
+        st = st.replace(tzinfo=CAIRO_TZ)
     hour_of_day = float(st.hour)
     is_weekend = float(st.weekday() >= 5)
 
@@ -90,12 +93,13 @@ def extract_features(session: Any, profile: Any, multi_protocol: bool = False, k
     canary_triggered = float(bool(getattr(profile, "canary_triggered", False)))
     canary_max_difficulty = float(getattr(profile, "canary_max_difficulty", 0) or 0)
     canary_trigger_count = min(float(getattr(profile, "canary_trigger_count", 0) or 0), 50.0)
+    cumulative_canary_score = min(float(getattr(profile, "cumulative_canary_score", 0) or 0), 1.0)
 
     last_seen = getattr(profile, "last_seen", None)
     if last_seen is not None:
         if last_seen.tzinfo is None:
-            last_seen = last_seen.replace(tzinfo=timezone.utc)
-        seconds_since_last_event = float((datetime.now(timezone.utc) - last_seen).total_seconds())
+            last_seen = last_seen.replace(tzinfo=CAIRO_TZ)
+        seconds_since_last_event = float((datetime.now(CAIRO_TZ) - last_seen).total_seconds())
     else:
         seconds_since_last_event = 0.0
     seconds_since_last_event = min(seconds_since_last_event, 86400.0)
@@ -120,5 +124,6 @@ def extract_features(session: Any, profile: Any, multi_protocol: bool = False, k
         canary_triggered,
         canary_max_difficulty,
         canary_trigger_count,
+        cumulative_canary_score,
         seconds_since_last_event,
     ]

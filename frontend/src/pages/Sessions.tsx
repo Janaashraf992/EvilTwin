@@ -35,7 +35,7 @@ export function Sessions() {
               setIp(e.target.value);
             }}
             placeholder="Filter by IP"
-            className="rounded border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm"
+            className="input-theme"
           />
           <select
             value={threatLevel}
@@ -43,7 +43,7 @@ export function Sessions() {
               setPage(1);
               setThreatLevel(e.target.value);
             }}
-            className="rounded border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm"
+            className="input-theme"
           >
             <option value="">All threat levels</option>
             <option value="0">0</option>
@@ -58,7 +58,7 @@ export function Sessions() {
               setPage(1);
               setHoneypot(e.target.value);
             }}
-            className="rounded border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm"
+            className="input-theme"
           >
             <option value="">All honeypots</option>
             <option value="cowrie">cowrie</option>
@@ -71,7 +71,7 @@ export function Sessions() {
               setPage(1);
               setPageSize(Number(e.target.value));
             }}
-            className="rounded border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm"
+            className="input-theme"
           >
             <option value="10">10 / page</option>
             <option value="25">25 / page</option>
@@ -84,7 +84,7 @@ export function Sessions() {
               setDateFrom(e.target.value);
             }}
             type="datetime-local"
-            className="rounded border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm"
+            className="input-theme"
           />
           <input
             value={dateTo}
@@ -93,7 +93,7 @@ export function Sessions() {
               setDateTo(e.target.value);
             }}
             type="datetime-local"
-            className="rounded border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm"
+            className="input-theme"
           />
         </section>
         <SessionList sessions={data?.items ?? []} selectedId={selectedId} onSelect={setSelectedId} />
@@ -105,7 +105,7 @@ export function Sessions() {
           >
             Prev
           </button>
-          <span className="text-sm text-slate-300">Page {data?.page ?? page} / {data?.pages ?? 1}</span>
+          <span className="text-sm text-text-muted">Page {data?.page ?? page} / {data?.pages ?? 1}</span>
           <button
             className="glass rounded px-3 py-1 text-sm"
             disabled={(data?.page ?? page) >= (data?.pages ?? 1)}

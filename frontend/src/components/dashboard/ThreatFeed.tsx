@@ -3,16 +3,9 @@ import { ThreatBadge } from "../shared/ThreatBadge";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { generateMockAlert } from "../../api/mockData";
+import { getRelativeTime } from "../../utils/date";
 
 const SHOWCASE_MODE = import.meta.env.VITE_SHOWCASE_MODE === 'true';
-
-function getRelativeTime(dateString: string) {
-  const diffInSeconds = Math.floor((new Date().getTime() - new Date(dateString).getTime()) / 1000);
-  if (diffInSeconds < 60) return `${diffInSeconds}s ago`;
-  const diffInMinutes = Math.floor(diffInSeconds / 60);
-  if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-  return new Date(dateString).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 export function ThreatFeed() {
   const alerts = useAlertStore((s) => s.alerts).slice(0, 100);

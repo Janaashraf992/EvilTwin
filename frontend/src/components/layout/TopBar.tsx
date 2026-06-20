@@ -1,4 +1,5 @@
 import { useWebSocket } from "../../hooks/useWebSocket";
+import { formatTime } from "../../utils/date";
 
 const WS_URL = import.meta.env.VITE_WS_URL ??
   `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:8000/ws/alerts`;
@@ -20,7 +21,7 @@ export function TopBar() {
           </span>
         </div>
         <div className="mt-2 text-xs text-text-muted font-mono">
-          {lastPing ? `Last Event: ${lastPing.toLocaleTimeString()}` : "Awaiting transmission..."}
+          {lastPing ? `Last Event: ${formatTime(lastPing)}` : "Awaiting transmission..."}
         </div>
         {!connected && retryCount > 0 && (
           <p className="mt-1 flex text-xs text-warning opacity-80">

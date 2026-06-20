@@ -1,6 +1,8 @@
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
+
+from config import CAIRO_TZ
 from uuid import uuid4
 
 import pytest
@@ -28,7 +30,7 @@ def test_parse_cowrie_event_accepts_epoch_timestamps_and_defaults():
     assert str(payload.dst_ip) == "10.0.2.10"
     assert payload.dst_port == 22
     assert payload.protocol == "ssh"
-    assert payload.timestamp == datetime.fromtimestamp(1_711_061_200, tz=timezone.utc)
+    assert payload.timestamp == datetime.fromtimestamp(1_711_061_200, tz=CAIRO_TZ)
 
 
 @pytest.mark.asyncio

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import get_settings
+from config import CAIRO_TZ, cairo_iso, get_settings
 from database import get_db
 from deps import get_current_user
 from ip_utils import is_private_or_reserved
@@ -23,21 +23,27 @@ from state import app_state
 
 router = APIRouter(tags=["canary"])
 
+
+def _default_score_value(difficulty: int) -> float:
+    mapping = {0: 0.05, 1: 0.15, 2: 0.25, 3: 0.40, 4: 0.60}
+    return mapping.get(difficulty, 0.15)
+
+
 # ---------------------------------------------------------------------------
 # Canary token management (authenticated)
 # ---------------------------------------------------------------------------
 
 def _token_to_response(token: CanaryToken) -> CanaryTokenResponse:
     settings = get_settings()
-    # Build the webhook URL analysts can paste into canarytokens.org or similar
-    # The token_id field in the payload should equal str(token.id)
     webhook_url = f"{settings.VITE_API_BASE_URL}/webhook/canary"
+    sv = token.score_value if token.score_value > 0 else _default_score_value(token.difficulty)
     return CanaryTokenResponse(
         id=token.id,
         label=token.label,
         description=token.description,
         token_kind=token.token_kind,
         difficulty=token.difficulty,
+        score_value=sv,
         created_at=token.created_at,
         last_triggered_at=token.last_triggered_at,
         trigger_count=token.trigger_count,
@@ -75,7 +81,8 @@ async def create_canary_token(
         description=body.description,
         token_kind=body.token_kind,
         difficulty=body.difficulty,
-        created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        score_value=body.score_value if body.score_value > 0 else _default_score_value(body.difficulty),
+        created_at=datetime.now(CAIRO_TZ).replace(tzinfo=None),
         trigger_count=0,
         is_active=True,
     )
@@ -131,7 +138,7 @@ async def ingest_canary(
         registered_token = await db.get(CanaryToken, token_uuid)
         if registered_token is not None:
             registered_token.trigger_count = (registered_token.trigger_count or 0) + 1
-            registered_token.last_triggered_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            registered_token.last_triggered_at = datetime.now(CAIRO_TZ).replace(tzinfo=None)
     except (ValueError, AttributeError):
         pass  # token_id is not a UUID — external token, proceed normally
 
@@ -142,7 +149,7 @@ async def ingest_canary(
     if is_private_or_reserved(ip):
         raise HTTPException(status_code=422, detail=f"Rejected private/reserved IP: {ip}")
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(CAIRO_TZ).replace(tzinfo=None)
     profile = await db.get(AttackerProfile, ip)
     if profile is None:
         profile = AttackerProfile(
@@ -157,9 +164,12 @@ async def ingest_canary(
         profile.total_sessions = (profile.total_sessions or 0) + 1
 
     diff = registered_token.difficulty if registered_token is not None else 3
+    token_score_val = (registered_token.score_value if registered_token is not None and registered_token.score_value > 0
+                       else _default_score_value(diff))
     profile.canary_triggered = True
     profile.canary_max_difficulty = max(profile.canary_max_difficulty or 0, diff)
     profile.canary_trigger_count = (profile.canary_trigger_count or 0) + 1
+    profile.cumulative_canary_score = min(1.0, (profile.cumulative_canary_score or 0.0) + token_score_val)
 
     session = SessionLog(
         id=uuid.uuid4(),
@@ -183,8 +193,9 @@ async def ingest_canary(
     else:
         score, level = 0.0, 0
 
-    profile.threat_score = max(score, profile.threat_score or 0.0)
-    profile.threat_level = max(level, profile.threat_level or 0)
+    additive_score = min(1.0, (profile.threat_score or 0.0) + token_score_val)
+    profile.threat_score = max(score, additive_score)
+    profile.threat_level = max(level, diff, profile.threat_level or 0)
     await db.flush()
 
     alert = Alert(
@@ -203,7 +214,7 @@ async def ingest_canary(
         "attacker_ip": ip,
         "threat_level": alert.threat_level,
         "message": alert.message,
-        "created_at": alert.created_at.isoformat() if alert.created_at else datetime.now(timezone.utc).isoformat(),
+        "created_at": cairo_iso(alert.created_at) if alert.created_at else cairo_iso(datetime.now(CAIRO_TZ)),
         "acknowledged": False,
     }
 

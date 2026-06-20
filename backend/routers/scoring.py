@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models import AttackerProfile
-from schemas import ScoreResponse
+from schemas import GatewayScoreRequest, GatewayScoreResponse, ScoreResponse
 from state import app_state
 
 router = APIRouter(prefix="/score", tags=["scoring"])
@@ -38,3 +38,11 @@ async def get_score(
         vpn_detected = result.vpn or result.proxy or result.tor
 
     return ScoreResponse(ip=parsed_ip, threat_score=0.0, threat_level=0, vpn_detected=vpn_detected)
+
+
+@router.post("/initial", response_model=GatewayScoreResponse)
+async def score_initial(payload: GatewayScoreRequest) -> GatewayScoreResponse:
+    from services.gateway_scorer import classify_connection
+
+    result = await classify_connection(payload)
+    return GatewayScoreResponse(**result)

@@ -29,6 +29,11 @@ class Token(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
 
+class UserUpdate(BaseModel):
+    email: Optional[str] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
+
 class TokenData(BaseModel):
     user_id: Optional[UUID] = None
 
@@ -138,6 +143,7 @@ class StatsResponse(BaseModel):
     unique_attackers_24h: int
     critical_alerts_24h: int
     canary_triggers_24h: int
+    vpn_users_count: int
     honeypot_breakdown: List[dict]  # [{honeypot, count}]
     top_commands: List[dict]
     attacks_by_hour: List[dict]
@@ -159,6 +165,7 @@ class CanaryTokenCreate(BaseModel):
     description: Optional[str] = None
     token_kind: str = "url"  # url, file, dns, aws_key, custom
     difficulty: int = 1  # 1=easy, 2=moderate, 3=devious
+    score_value: float = 0.0  # how much threat score this token adds when triggered (0.0 - 1.0)
 
 
 class CanaryTokenResponse(BaseModel):
@@ -168,6 +175,7 @@ class CanaryTokenResponse(BaseModel):
     description: Optional[str]
     token_kind: str
     difficulty: int
+    score_value: float
     created_at: datetime
     last_triggered_at: Optional[datetime]
     trigger_count: int
@@ -212,3 +220,32 @@ class ChatResponse(BaseModel):
     reply: str
     model_used: str
     tokens_used: int
+
+
+# --- Gateway Pre-Screen Schemas ---
+
+class GatewayScoreRequest(BaseModel):
+    src_ip: str
+    src_port: int
+    client_version: str = ""
+    kex_algorithms_hash: str = ""
+    time_to_first_auth: float = 0.0
+    auth_attempts_count: int = 0
+    auth_methods_used: list[str] = []
+    usernames_tried: list[str] = []
+    public_key_attempted: bool = False
+    shell_requested: bool = False
+    exec_command: Optional[str] = None
+    is_interactive: bool = False
+    auth_attempt_interval: float = 0.0
+
+
+class GatewayScoreResponse(BaseModel):
+    decision: str  # "real" or "honeypot"
+    confidence: float
+    reason: str
+    user_type: str = "unknown"
+    ml_level: int = -1
+    ml_confidence: float = 0.0
+    llm_used: bool = False
+    llm_explanation: str = ""

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from config import CAIRO_TZ, cairo_iso
 
 from ip_utils import is_private_or_reserved
 from models import Alert, AttackerProfile, SessionLog
@@ -39,7 +41,7 @@ async def ingest_event(
     current_session_id = session_uuid(src_ip, payload.session)
 
     profile = await db.get(AttackerProfile, src_ip)
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(CAIRO_TZ).replace(tzinfo=None)
     if profile is None:
         profile = AttackerProfile(
             ip=src_ip,
@@ -138,7 +140,7 @@ async def ingest_event(
             "attacker_ip": src_ip,
             "threat_level": level,
             "message": alert.message,
-            "created_at": alert.created_at.isoformat() if alert.created_at else now.isoformat(),
+            "created_at": cairo_iso(alert.created_at) if alert.created_at else cairo_iso(now),
             "acknowledged": False,
         }
 

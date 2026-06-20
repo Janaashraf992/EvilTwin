@@ -1,15 +1,16 @@
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from config import get_settings
+from config import CAIRO_TZ, get_settings
 from database import close_db, get_db_context, init_db
 from routers import alerts, canary, dashboard, health, ingest, scoring, sessions, auth
 from routers import ai as ai_router
+from routers import splunk as splunk_router
 from services.cowrie import watch_cowrie_log
 from services.dionaea import watch_dionaea_log
 from state import app_state
@@ -19,7 +20,7 @@ from state import app_state
 async def lifespan(_: FastAPI):
     settings = get_settings()
     init_db(settings.database_url)
-    app_state.started_at = datetime.now(timezone.utc)
+    app_state.started_at = datetime.now(CAIRO_TZ)
     background_tasks: list[asyncio.Task[None]] = []
 
     # Services initialize lazily, but model loading is attempted on startup.
@@ -35,6 +36,11 @@ async def lifespan(_: FastAPI):
         app_state.splunk_forwarder = SplunkForwarder(
             settings.SPLUNK_HEC_URL, settings.SPLUNK_HEC_TOKEN
         )
+        async def _startup_sync():
+            from routers.splunk import splunk_startup_sync
+            async with get_db_context() as db:
+                await splunk_startup_sync(db)
+        background_tasks.append(asyncio.create_task(_startup_sync()))
 
     if settings.LLM_API_KEY:
         app_state.llm_service = LLMService(
@@ -127,3 +133,4 @@ app.include_router(alerts.router)
 app.include_router(dashboard.router)
 app.include_router(canary.router)
 app.include_router(ai_router.router)
+app.include_router(splunk_router.router)
