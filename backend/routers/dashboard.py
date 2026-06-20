@@ -160,3 +160,48 @@ async def get_top_attackers(
         }
         for row in rows
     ]
+
+
+@router.get("/vpn-users")
+async def get_vpn_users(
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> list[dict]:
+    since = datetime.now(CAIRO_TZ).replace(tzinfo=None) - timedelta(hours=24)
+
+    from models import AttackerProfile
+
+    rows = (
+        await db.execute(
+            select(
+                AttackerProfile.ip,
+                AttackerProfile.country,
+                AttackerProfile.city,
+                AttackerProfile.isp,
+                AttackerProfile.threat_level,
+                func.count(SessionLog.id).label("session_count"),
+                func.max(SessionLog.start_time).label("last_seen"),
+            )
+            .join(SessionLog, SessionLog.attacker_ip == AttackerProfile.ip)
+            .where(
+                AttackerProfile.vpn_detected == True,
+                SessionLog.start_time >= since,
+            )
+            .group_by(AttackerProfile.ip)
+            .order_by(func.count(SessionLog.id).desc())
+            .limit(100)
+        )
+    ).all()
+
+    return [
+        {
+            "ip": str(row.ip),
+            "city": row.city or "",
+            "country": row.country or "",
+            "isp": row.isp or "",
+            "session_count": row.session_count,
+            "threat_level": row.threat_level or 0,
+            "last_seen": row.last_seen.isoformat() if row.last_seen else None,
+        }
+        for row in rows
+    ]

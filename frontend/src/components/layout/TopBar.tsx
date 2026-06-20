@@ -14,7 +14,7 @@ export function TopBar() {
         <p className="text-sm text-text-muted mt-0.5">Real-time analyst view across deception infrastructure</p>
       </div>
       <div className="text-right flex flex-col items-end">
-        <div className="flex items-center gap-2 bg-[#0A0E1A] px-3 py-1.5 rounded-full border border-border/50">
+        <div className="flex items-center gap-2 bg-base px-3 py-1.5 rounded-full border border-border">
           <div className={`h-2 w-2 rounded-full ${connected ? "bg-safe animate-pulse-dot" : "bg-threat"}`} />
           <span className={`text-xs font-mono uppercase tracking-wider ${connected ? "text-safe" : "text-threat"}`}>
             {connected ? "Stream Active" : "Disconnected"}

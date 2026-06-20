@@ -63,7 +63,7 @@ export const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center p-4 relative overflow-hidden">
+    <div className="min-h-screen bg-base text-text-primary flex items-center justify-center p-4 relative overflow-hidden">
       {/* Background gradients and elements similar to the dashboard */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
         <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] rounded-full bg-red-900/20 blur-[120px]" />
@@ -75,18 +75,18 @@ export const Login = () => {
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md"
       >
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-8 backdrop-blur-xl relative shadow-2xl">
+        <div className="bg-surface/70 border border-border rounded-2xl p-8 backdrop-blur-xl relative shadow-2xl">
           <div className="flex justify-center mb-8">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-red-500/20 to-orange-500/20 flex items-center justify-center border border-white/10 shadow-[0_0_30px_rgba(239,68,68,0.3)]">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-red-500/20 to-orange-500/20 flex items-center justify-center border border-red-500/20 shadow-[0_0_30px_rgba(239,68,68,0.3)]">
               <ShieldAlert className="w-8 h-8 text-red-500" />
             </div>
           </div>
           
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
+            <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-text-primary to-text-muted bg-clip-text text-transparent">
               EvilTwin SOC
             </h1>
-            <p className="text-white/40 mt-2 text-sm">Sign in to access the threat dashboard</p>
+            <p className="text-text-muted mt-2 text-sm">Sign in to access the threat dashboard</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
@@ -101,16 +101,16 @@ export const Login = () => {
             )}
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-white/40 uppercase tracking-wider pl-1">Email</label>
+              <label className="text-xs font-medium text-text-muted uppercase tracking-wider pl-1">Email</label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail className="h-5 w-5 text-white/30" />
+                  <Mail className="h-5 w-5 text-text-muted" />
                 </div>
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-3 border border-white/10 rounded-xl leading-5 bg-white/5 text-white placeholder-white/20 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-transparent transition-all sm:text-sm"
+                  className="block w-full pl-10 pr-3 py-3 border border-border rounded-xl leading-5 bg-surface/50 text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-transparent transition-all sm:text-sm"
                   placeholder="admin@eviltwin.local"
                   required
                 />
@@ -118,16 +118,16 @@ export const Login = () => {
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-white/40 uppercase tracking-wider pl-1">Password</label>
+              <label className="text-xs font-medium text-text-muted uppercase tracking-wider pl-1">Password</label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-white/30" />
+                  <Lock className="h-5 w-5 text-text-muted" />
                 </div>
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-3 border border-white/10 rounded-xl leading-5 bg-white/5 text-white placeholder-white/20 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-transparent transition-all sm:text-sm"
+                  className="block w-full pl-10 pr-3 py-3 border border-border rounded-xl leading-5 bg-surface/50 text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-transparent transition-all sm:text-sm"
                   placeholder={SHOWCASE_MODE ? "admin" : "••••••••"}
                   required
                 />

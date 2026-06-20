@@ -2,19 +2,19 @@ import type { Config } from "tailwindcss";
 
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  darkMode: "class",
   theme: {
     extend: {
       colors: {
-        // SOC dark theme palette
-        base: "#0A0E1A",
-        surface: "#101626",
-        elevated: "#182038",
+        base: "rgb(var(--color-base) / <alpha-value>)",
+        surface: "rgb(var(--color-surface) / <alpha-value>)",
+        elevated: "rgb(var(--color-elevated) / <alpha-value>)",
+        "text-primary": "rgb(var(--color-text-primary) / <alpha-value>)",
+        "text-muted": "rgb(var(--color-text-muted) / <alpha-value>)",
+        border: "rgb(var(--color-border) / <alpha-value>)",
         threat: "#E63946",
         safe: "#2EC4B6",
         warning: "#F4A261",
-        "text-primary": "#F1F5F9",
-        "text-muted": "#94A3B8",
-        border: "rgba(255, 255, 255, 0.08)",
       },
       fontFamily: {
         display: ["'JetBrains Mono'", "monospace"],

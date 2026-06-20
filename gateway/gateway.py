@@ -71,7 +71,7 @@ class GatewaySession(asyncssh.SSHServerSession):
             try:
                 await asyncio.wait_for(
                     asyncio.shield(self._server._score_task),
-                    timeout=1.0,
+                    timeout=AUTH_COLLECT_WINDOW_S + 3.0,
                 )
             except (asyncio.TimeoutError, Exception):
                 pass
@@ -311,30 +311,42 @@ class GatewayServer(asyncssh.SSHServer):
 
     async def _request_score(self) -> None:
         assert self._signals is not None
-        payload = self._signals.to_payload()
-        decision = "honeypot"
-        reason = "backend unreachable"
-        confidence = 0.60
 
-        try:
-            import aiohttp
+        # ---- First attempt ----
+        result = await self._score_call(attempt=1)
+        decision = result["decision"]
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{BACKEND_URL}/score/initial",
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=BACKEND_TIMEOUT),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        decision = data.get("decision", "honeypot")
-                        confidence = data.get("confidence", 0.60)
-                        reason = data.get("reason", "backend response")
-                        user_type = data.get("user_type", "")
-                        llm_used = data.get("llm_used", False)
-                        llm_explanation = data.get("llm_explanation", "")
-        except Exception as exc:
-            logger.warning("Backend %s unreachable: %s", BACKEND_URL, exc)
+        # ---- If inconclusive, wait for more signals, then second attempt ----
+        if decision == "inconclusive":
+            logger.info(
+                "%s — inconclusive on first pass, waiting for more signals (window=%ss)",
+                self._signals.src_ip, AUTH_COLLECT_WINDOW_S,
+            )
+            deadline = time.monotonic() + AUTH_COLLECT_WINDOW_S
+            while time.monotonic() < deadline:
+                await asyncio.sleep(0.3)
+                if self._signals.ready:
+                    break
+
+            logger.info(
+                "%s — second pass with %d auth_attempts, %d usernames",
+                self._signals.src_ip,
+                self._signals.auth_attempts_count,
+                len(self._signals.usernames_tried),
+            )
+            result = await self._score_call(attempt=2)
+
+            if result["decision"] == "inconclusive":
+                result["decision"] = "honeypot"
+                result["confidence"] = 0.50
+                result["reason"] = "still inconclusive after timeout — safe fallback to honeypot"
+
+        decision = result["decision"]
+        confidence = result["confidence"]
+        reason = result["reason"]
+        user_type = result.get("user_type", "")
+        llm_used = result.get("llm_used", False)
+        llm_explanation = result.get("llm_explanation", "")
 
         log_parts = [f"Decision for {self._signals.src_ip} → {decision} (confidence={confidence:.2f} reason={reason})"]
         if user_type:
@@ -343,6 +355,41 @@ class GatewayServer(asyncssh.SSHServer):
             log_parts.append(f"LLM: {llm_explanation}")
         logger.info(" | ".join(log_parts))
         self._signals.set_decision(decision)
+
+    async def _score_call(self, attempt: int) -> dict:
+        assert self._signals is not None
+        payload = self._signals.to_payload()
+
+        try:
+            import aiohttp
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{BACKEND_URL}/score/initial?attempt={attempt}",
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=BACKEND_TIMEOUT),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return {
+                            "decision": data.get("decision", "honeypot"),
+                            "confidence": data.get("confidence", 0.60),
+                            "reason": data.get("reason", "backend response"),
+                            "user_type": data.get("user_type", ""),
+                            "llm_used": data.get("llm_used", False),
+                            "llm_explanation": data.get("llm_explanation", ""),
+                        }
+        except Exception as exc:
+            logger.warning("Backend %s unreachable: %s", BACKEND_URL, exc)
+
+        return {
+            "decision": "honeypot",
+            "confidence": 0.60,
+            "reason": "backend unreachable",
+            "user_type": "",
+            "llm_used": False,
+            "llm_explanation": "",
+        }
 
     def session_requested(self) -> Optional[GatewaySession]:
         assert self._signals is not None

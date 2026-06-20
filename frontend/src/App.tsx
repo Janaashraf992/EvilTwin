@@ -9,6 +9,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Sessions } from "./pages/Sessions";
 import { Settings } from "./pages/Settings";
 import { ThreatIntel } from "./pages/ThreatIntel";
+import { VpnUsers } from "./pages/VpnUsers";
 import { Login } from "./pages/Login";
 
 function AppShell() {
@@ -45,6 +46,7 @@ export default function App() {
               <Route path="/sessions" element={<Sessions />} />
               <Route path="/canary" element={<Canary />} />
               <Route path="/threat-intel" element={<ThreatIntel />} />
+              <Route path="/vpn-users" element={<VpnUsers />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>

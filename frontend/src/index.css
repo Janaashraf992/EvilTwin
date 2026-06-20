@@ -4,11 +4,42 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-base: 10 14 26;
+  --color-surface: 16 22 38;
+  --color-elevated: 24 32 56;
+  --color-text-primary: 241 245 249;
+  --color-text-muted: 148 163 184;
+  --color-border: 255 255 255;
+  --color-tooltip-bg: #0F1424;
+  --color-tooltip-border: rgba(255,255,255,0.07);
+  --color-tooltip-text: #E8EAF0;
+  --color-gauge-bg: #141928;
+}
+
+.light {
+  --color-base: 240 244 248;
+  --color-surface: 255 255 255;
+  --color-elevated: 226 232 240;
+  --color-text-primary: 30 41 59;
+  --color-text-muted: 100 116 139;
+  --color-border: 0 0 0;
+  --color-tooltip-bg: #FFFFFF;
+  --color-tooltip-border: rgba(0,0,0,0.1);
+  --color-tooltip-text: #1E293B;
+  --color-gauge-bg: #E2E8F0;
+}
+
 @layer base {
   body {
     @apply bg-base font-body text-text-primary antialiased;
     min-height: 100vh;
     background: radial-gradient(circle at top right, rgba(20, 25, 40, 1) 0%, rgba(10, 14, 26, 1) 100%);
+    background-attachment: fixed;
+  }
+
+  .light body {
+    background: radial-gradient(circle at top right, #E8EDF2 0%, #F0F4F8 100%);
     background-attachment: fixed;
   }
 
@@ -20,8 +51,16 @@
     @apply bg-base;
   }
 
+  .light ::-webkit-scrollbar-track {
+    background: #E2E8F0;
+  }
+
   ::-webkit-scrollbar-thumb {
     @apply rounded-full bg-slate-700/50 hover:bg-slate-500/80 transition-colors;
+  }
+
+  .light ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300/80 hover:bg-slate-400/80 transition-colors;
   }
 
   ::selection {
@@ -30,14 +69,26 @@
 }
 
 @layer components {
-  /* Premium Glassmorphism base container */
   .glass {
-    @apply bg-surface/50 border border-border/50 backdrop-blur-md shadow-panel transition-all duration-300;
+    @apply bg-surface/50 border border-border/5 backdrop-blur-md shadow-panel transition-all duration-300;
   }
 
-  /* Deeper elevation for popups and tooltips */
+  .light .glass {
+    box-shadow: 0 16px 48px -12px rgba(0, 0, 0, 0.15);
+  }
+
+  .input-theme {
+    @apply border border-border rounded-lg px-3 py-2 text-sm outline-none transition-colors bg-surface/50 text-text-primary placeholder-text-muted focus:ring-2 focus:ring-red-500/30;
+  }
+
   .glass-elevated {
-    @apply bg-elevated/70 border border-white/10 backdrop-blur-xl shadow-glow transition-all duration-300;
+    @apply bg-elevated/70 border border-border/10 backdrop-blur-xl transition-all duration-300;
+    box-shadow: 0 0 24px rgba(230, 57, 70, 0.25);
+  }
+
+  .light .glass-elevated {
+    background: rgb(var(--color-elevated) / 0.95);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
   }
 
   .mono {
@@ -48,7 +99,6 @@
     @apply font-display text-3xl font-semibold tabular-nums tracking-tighter;
   }
 
-  /* Technical animated grid baseline */
   .grid-line {
     background-image:
       linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
@@ -57,7 +107,6 @@
     background-position: center center;
   }
 
-  /* Improved Threat Color coding with gradient text-clips and rich borders */
   .threat-critical { @apply bg-threat/10 text-threat border-threat/40 shadow-[0_0_15px_rgba(230,57,70,0.15)]; }
   .threat-high { @apply bg-orange-500/10 text-orange-400 border-orange-500/40 shadow-[0_0_15px_rgba(249,115,22,0.15)]; }
   .threat-medium { @apply bg-warning/10 text-warning border-warning/40 shadow-[0_0_15px_rgba(244,162,97,0.15)]; }

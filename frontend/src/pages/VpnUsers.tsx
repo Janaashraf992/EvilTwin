@@ -18,7 +18,7 @@ const item = {
   show: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
 
-function ThreatBadge({ level }: { level: number }) {
+function ThreatBadgeLocal({ level }: { level: number }) {
   const colors: Record<number, string> = {
     0: "bg-slate-500/20 text-text-muted",
     1: "bg-emerald-500/20 text-emerald-400",
@@ -72,7 +72,7 @@ export function VpnUsers() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-text-primary">VPN Users</h1>
-          <p className="text-sm muted-theme">Detected VPN connections in the last 24 hours</p>
+          <p className="text-sm text-text-muted">Detected VPN connections in the last 24 hours</p>
         </div>
       </motion.div>
 
@@ -81,17 +81,17 @@ export function VpnUsers() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-border/50">
-                <th className="px-6 py-4 text-left text-xs font-semibold muted-theme uppercase tracking-wider">IP Address</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold muted-theme uppercase tracking-wider">Location</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold muted-theme uppercase tracking-wider">ISP</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold muted-theme uppercase tracking-wider">Sessions</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold muted-theme uppercase tracking-wider">Threat</th>
-                <th className="px-6 py-4 text-left text-xs font-semibold muted-theme uppercase tracking-wider">Last Seen</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">IP Address</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Location</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">ISP</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Sessions</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Threat</th>
+                <th className="px-6 py-4 text-left text-xs font-semibold text-text-muted uppercase tracking-wider">Last Seen</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/30">
               {vpnUsers?.map((user) => (
-                <tr key={user.ip} className="hover-theme transition-colors">
+                <tr key={user.ip} className="hover:bg-surface/50 transition-colors">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
                       <div className="p-2 bg-cyan-500/10 rounded-lg">
@@ -102,7 +102,7 @@ export function VpnUsers() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      <MapPin className="w-4 h-4 muted-theme" />
+                      <MapPin className="w-4 h-4 text-text-muted" />
                       <span className="text-sm text-text-primary/70">
                         {[user.city, user.country].filter(Boolean).join(", ") || "Unknown"}
                       </span>
@@ -115,12 +115,12 @@ export function VpnUsers() {
                     <span className="text-sm font-medium text-text-primary">{user.session_count}</span>
                   </td>
                   <td className="px-6 py-4">
-                    <ThreatBadge level={user.threat_level} />
+                    <ThreatBadgeLocal level={user.threat_level} />
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4 muted-theme" />
-                      <span className="text-sm muted-theme">
+                      <Clock className="w-4 h-4 text-text-muted" />
+                      <span className="text-sm text-text-muted">
                         {user.last_seen ? formatDateTime(user.last_seen) : "N/A"}
                       </span>
                     </div>
@@ -129,7 +129,7 @@ export function VpnUsers() {
               ))}
               {vpnUsers?.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center muted-theme">
+                  <td colSpan={6} className="px-6 py-12 text-center text-text-muted">
                     No VPN users detected in the last 24 hours
                   </td>
                 </tr>

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Optional
+
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import CAIRO_TZ, get_settings
+from models import AttackerProfile, SessionLog
 from schemas import GatewayScoreRequest
 from services.ip_reputation import (
-    ConnectionHistory,
-    get_connection_history,
     has_any_suspicious_username,
     is_deprecated_client,
     is_in_cidr_list,
@@ -24,44 +27,157 @@ logger = logging.getLogger(__name__)
 
 async def classify_connection(
     payload: GatewayScoreRequest,
+    attempt: int = 1,
+    db: Optional[AsyncSession] = None,
 ) -> dict:
     settings = get_settings()
-    conn_history = get_connection_history()
-    conn_history.record_connect(payload.src_ip)
 
-    is_tor = await _check_tor(payload.src_ip)
+    # ---- DB: check reconnect + store temporary session entry ----
+    is_reconnect = False
+    session_id = None
+    profile_was_new = False
+    profile = None
 
-    decision, confidence, reason = _run_heuristic_rules(
-        payload, settings, conn_history, is_tor
-    )
-    user_type = _infer_user_type(decision, reason)
+    if db is not None:
+        now_dt = datetime.now(CAIRO_TZ)
+        window_start = now_dt - timedelta(seconds=60)
 
-    ml_level = -1
-    ml_confidence = 0.0
-    llm_used = False
-    llm_explanation = ""
-
-    if confidence < 0.85:
-        ml_level, ml_confidence = _run_ml_tier(payload)
-        decision, confidence = _blend_tiers(
-            decision, confidence, ml_level, ml_confidence
+        # Clean up stale gateway sessions (abandoned pass-1 sessions >5min old)
+        await db.execute(
+            delete(SessionLog).where(
+                SessionLog.attacker_ip == payload.src_ip,
+                SessionLog.honeypot == "gateway",
+                SessionLog.start_time < now_dt - timedelta(minutes=5),
+            )
         )
 
-        if _needs_llm(decision, confidence, ml_level, ml_confidence, reason):
-            llm_used = True
-            llm_result = await _run_llm_tier(
-                payload, decision, confidence, reason, ml_level
+        # R12: ANY recent session from this IP (gateway, cowrie, dionaea — all of them)
+        result = await db.execute(
+            select(SessionLog.id).where(
+                SessionLog.attacker_ip == payload.src_ip,
+                SessionLog.start_time >= window_start,
+            ).limit(1)
+        )
+        is_reconnect = result.scalar() is not None
+
+        # Session reuse: only gateway sessions (re-call from the same connection)
+        result = await db.execute(
+            select(SessionLog).where(
+                SessionLog.attacker_ip == payload.src_ip,
+                SessionLog.start_time >= window_start,
+                SessionLog.honeypot == "gateway",
+            ).order_by(SessionLog.start_time.desc()).limit(1)
+        )
+        recent_gateway = result.scalar_one_or_none()
+
+        # Get or create AttackerProfile
+        result = await db.execute(
+            select(AttackerProfile).where(AttackerProfile.ip == payload.src_ip)
+        )
+        profile = result.scalar_one_or_none()
+        if profile is None:
+            profile = AttackerProfile(ip=payload.src_ip)
+            db.add(profile)
+            profile_was_new = True
+
+        # Reuse session from first pass if this is a re-call
+        if recent_gateway is not None and attempt >= 2:
+            session_id = recent_gateway.id
+            recent_gateway.raw_log = payload.model_dump()
+        else:
+            session = SessionLog(
+                attacker_ip=payload.src_ip,
+                honeypot="gateway",
+                protocol="ssh",
+                start_time=now_dt,
+                commands=[],
+                credentials_tried=[],
+                malware_hashes=[],
+                raw_log=payload.model_dump(),
             )
-            if llm_result:
-                decision = llm_result.get("decision", decision)
-                confidence = llm_result.get("confidence", confidence)
-                user_type = llm_result.get("user_type", user_type)
-                llm_explanation = llm_result.get("explanation", "")
+            session.attacker = profile
+            db.add(session)
+            await db.flush()
+            session_id = session.id
+    else:
+        now_dt = datetime.now(CAIRO_TZ)
+
+    llm_used = False
+    llm_explanation = ""
+    user_type = "unknown"
+
+    # ---- Pre-gate: known attacker? skip all tiers, route directly to honeypot ----
+    if profile is not None and profile.threat_level >= 2 and profile.total_sessions >= 1:
+        decision = "honeypot"
+        confidence = 1.00
+        arbitrate_reason = (
+            f"known attacker — threat_level={profile.threat_level}, "
+            f"sessions={profile.total_sessions}"
+        )
+        verdict = "decided"
+        ml_level = -1
+        ml_confidence = 0.0
+    else:
+        # ---- Tier 1: Heuristic rules → recommendation only ----
+        rule_decision, rule_confidence, rule_reason = _run_heuristic_rules(
+            payload, settings, is_reconnect
+        )
+
+        # ---- Extract rich signals from payload (feeds both ML and LLM) ----
+        signals = _extract_signals(payload, is_reconnect)
+
+        # ---- Tier 2: ML always runs (independent verification) ----
+        ml_level, ml_confidence, ml_decision = _run_ml_tier(signals)
+
+        # ---- Tier 3: Arbitrate — compare rule recommendation vs ML verdict ----
+        decision, confidence, arbitrate_reason, verdict = _arbitrate(
+            rule_decision, rule_confidence, rule_reason,
+            ml_level, ml_confidence, ml_decision,
+        )
+
+        # ---- Tier 4: On first pass, return 'inconclusive' so gateway waits for more signals ----
+        # On second pass (or if already decided), run LLM as final arbiter if still stuck.
+        if verdict == "inconclusive":
+            if attempt >= 2:
+                llm_result = await _run_llm_tier(
+                    payload, signals,
+                    rule_decision, rule_confidence, rule_reason,
+                    ml_level, ml_confidence, ml_decision,
+                )
+                if llm_result:
+                    llm_used = True
+                    decision = llm_result.get("decision", "honeypot")
+                    confidence = llm_result.get("confidence", 0.60)
+                    user_type = llm_result.get("user_type", "unknown")
+                    llm_explanation = llm_result.get("explanation", "")
+                    arbitrate_reason = f"LLM final verdict: {llm_explanation[:80]}"
+                else:
+                    decision = "honeypot"
+                    confidence = 0.55
+                    arbitrate_reason = "LLM unavailable — safe fallback to honeypot"
+            # On attempt=1: leave decision as 'inconclusive' so gateway knows to wait
+
+    # ---- Post-decision DB cleanup ----
+    if db is not None and session_id is not None:
+        if decision == "real":
+            if profile_was_new and profile is not None:
+                await db.delete(profile)
+            else:
+                await db.execute(
+                    delete(SessionLog).where(SessionLog.id == session_id)
+                )
+        elif decision == "honeypot" and profile is not None:
+            profile.last_seen = now_dt
+            profile.total_sessions += 1
+        # "inconclusive": leave as-is — gateway will retry or session will be cleaned up later
+
+    if not user_type or user_type == "unknown":
+        user_type = _infer_user_type(decision, arbitrate_reason)
 
     return {
         "decision": decision,
         "confidence": round(confidence, 2),
-        "reason": reason,
+        "reason": arbitrate_reason,
         "user_type": user_type,
         "ml_level": ml_level,
         "ml_confidence": round(ml_confidence, 2),
@@ -70,11 +186,61 @@ async def classify_connection(
     }
 
 
+# ---------------------------------------------------------------------------
+# Signal extraction (feeds ML + LLM with rich features)
+# ---------------------------------------------------------------------------
+
+def _extract_signals(payload: GatewayScoreRequest, is_reconnect: bool) -> dict:
+    now = datetime.now(CAIRO_TZ)
+    unique_usernames = list({u.lower() for u in payload.usernames_tried})
+
+    return {
+        "src_ip": payload.src_ip,
+        "src_port": payload.src_port,
+        "client_version": payload.client_version or "",
+        "kex_algorithms_hash": payload.kex_algorithms_hash or "",
+        # Numeric signals
+        "auth_attempts_count": payload.auth_attempts_count,
+        "time_to_first_auth": payload.time_to_first_auth,
+        "auth_attempt_interval": payload.auth_attempt_interval,
+        "unique_username_count": len(unique_usernames),
+        "suspicious_username_count": sum(
+            1 for u in unique_usernames if is_suspicious_username(u)
+        ),
+        # Boolean signals (1.0 / 0.0)
+        "public_key_attempted": 1.0 if payload.public_key_attempted else 0.0,
+        "shell_requested": 1.0 if payload.shell_requested else 0.0,
+        "is_interactive": 1.0 if payload.is_interactive else 0.0,
+        "has_exec_command": 1.0 if payload.exec_command else 0.0,
+        "suspicious_exec": (
+            1.0 if payload.exec_command and match_any_pattern(payload.exec_command, SUSPICIOUS_COMMAND_PATTERNS)
+            else 0.0
+        ),
+        "safe_exec": (
+            1.0 if payload.exec_command and match_any_pattern(payload.exec_command, SAFE_COMMAND_PATTERNS)
+            else 0.0
+        ),
+        "is_deprecated_client": (
+            1.0 if payload.client_version and is_deprecated_client(payload.client_version)
+            else 0.0
+        ),
+        "is_rapid_reconnect": 1.0 if is_reconnect else 0.0,
+        # Temporal
+        "hour_of_day": float(now.hour),
+        "is_weekend": 1.0 if now.weekday() >= 5 else 0.0,
+        # Method diversity
+        "auth_method_count": len(payload.auth_methods_used),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tier 1: Heuristic rules — first-match-wins recommendation engine
+# ---------------------------------------------------------------------------
+
 def _run_heuristic_rules(
     payload: GatewayScoreRequest,
     settings,
-    conn_history: ConnectionHistory,
-    is_tor: bool,
+    is_reconnect: bool,
 ) -> tuple[str, float, str]:
 
     # ---- RULE 1: Whitelist CIDR ----
@@ -89,39 +255,38 @@ def _run_heuristic_rules(
     if is_known_scanner(payload.src_ip):
         return ("honeypot", 0.98, "known internet scanner IP range")
 
-    # ---- RULE 4: Tor Exit Node ----
-    if is_tor:
-        return ("honeypot", 0.95, "Tor exit node — SSH from Tor is near-zero legitimate")
-
-    # ---- RULE 5: Deprecated/Attack SSH Client ----
+    # ---- RULE 4: Deprecated/Attack SSH Client ----
     if payload.client_version and is_deprecated_client(payload.client_version):
         return ("honeypot", 0.95, f"deprecated SSH client: {payload.client_version}")
 
-    # ---- RULE 6: Publickey + Clean Username ----
+    # ---- RULE 5: Publickey + Clean Username ----
     if payload.public_key_attempted and not has_any_suspicious_username(
         payload.usernames_tried
     ):
         return ("real", 0.92, "publickey auth with clean username")
 
-    # ---- RULE 7: Publickey + Suspicious Username ----
+    # ---- RULE 6: Publickey + Suspicious Username ----
     if payload.public_key_attempted:
         return ("honeypot", 0.88, "publickey auth but suspicious username")
 
-    # ---- RULE 8: Credential Spray (≥4 attempts) ----
+    # ---- RULE 7: Credential Spray (≥4 attempts) ----
     if payload.auth_attempts_count >= 4:
         return ("honeypot", 0.97, f"credential spray: {payload.auth_attempts_count} attempts")
 
-    # ---- RULE 9: Username Enumeration (≥3 different usernames) ----
+    # ---- RULE 8: Username Enumeration (≥3 different usernames) ----
     unique_usernames = [u.lower() for u in payload.usernames_tried]
     if len(set(unique_usernames)) >= 3:
         return ("honeypot", 0.92, f"username enumeration: {len(set(unique_usernames))} distinct usernames")
 
-    # ---- RULE 10: Suspicious Username ----
+    # ---- RULE 9: Suspicious Username + Bot-like Behavior ----
     for u in payload.usernames_tried:
         if is_suspicious_username(u):
-            return ("honeypot", 0.90, f"suspicious username: {u}")
+            fast_auth = payload.auth_attempt_interval > 0 and payload.auth_attempt_interval < 0.5
+            multi_attempt = payload.auth_attempts_count >= 2
+            if fast_auth or multi_attempt:
+                return ("honeypot", 0.88, f"suspicious username with bot-like behavior: {u}")
 
-    # ---- RULE 11: Bot Auth Speed (<0.3s between attempts) ----
+    # ---- RULE 10: Bot Auth Speed (<0.3s between attempts) ----
     if (
         payload.auth_attempts_count >= 2
         and payload.auth_attempt_interval > 0
@@ -134,33 +299,35 @@ def _run_heuristic_rules(
             f"automated auth speed: {payload.auth_attempt_interval:.2f}s interval",
         )
 
-    # ---- RULE 12: Bot Connect Speed (<0.15s to first auth) ----
-    if payload.time_to_first_auth > 0 and payload.time_to_first_auth < 0.15 and not _is_service_account(payload, settings):
+    # ---- RULE 11: Bot Connect Speed (<0.15s to first auth) ----
+    if (
+        payload.time_to_first_auth > 0
+        and payload.time_to_first_auth < 0.15
+        and not _is_service_account(payload, settings)
+    ):
         return (
             "honeypot",
             0.82,
             f"scanner connect speed: {payload.time_to_first_auth:.2f}s to first auth",
         )
 
-    # ---- RULE 13: Rapid Reconnect (same IP within 60s) ----
-    if conn_history.was_recent_reconnect(payload.src_ip, window=60.0):
+    # ---- RULE 12: Rapid Reconnect (same IP within 60s) ----
+    if is_reconnect:
         return ("honeypot", 0.88, "rapid reconnect from same IP within 60s")
 
-    # ---- RULE 14: Multi-Method Auth (only if multiple methods FAILED) ----
+    # ---- RULE 13: Multi-Method Auth ----
     if len(payload.auth_methods_used) >= 2 and payload.auth_attempts_count >= 3:
         return ("honeypot", 0.85, f"multiple auth methods attempted: {', '.join(payload.auth_methods_used)}")
 
-    # ---- RULE 15: Suspicious Exec Command ----
-    if payload.exec_command:
-        if match_any_pattern(payload.exec_command, SUSPICIOUS_COMMAND_PATTERNS):
-            return ("honeypot", 0.95, f"suspicious command: {payload.exec_command[:60]}")
+    # ---- RULE 14: Suspicious Exec Command ----
+    if payload.exec_command and match_any_pattern(payload.exec_command, SUSPICIOUS_COMMAND_PATTERNS):
+        return ("honeypot", 0.95, f"suspicious command: {payload.exec_command[:60]}")
 
-    # ---- RULE 16: Clean Non-Interactive Exec ----
-    if payload.exec_command and not payload.is_interactive:
-        if match_any_pattern(payload.exec_command, SAFE_COMMAND_PATTERNS):
-            return ("real", 0.72, f"clean non-interactive exec: {payload.exec_command[:40]}")
+    # ---- RULE 15: Clean Non-Interactive Exec ----
+    if payload.exec_command and not payload.is_interactive and match_any_pattern(payload.exec_command, SAFE_COMMAND_PATTERNS):
+        return ("real", 0.72, f"clean non-interactive exec: {payload.exec_command[:40]}")
 
-    # ---- RULE 17: Clean Interactive Shell ----
+    # ---- RULE 16: Clean Interactive Shell (publickey) ----
     if (
         payload.shell_requested
         and payload.is_interactive
@@ -168,111 +335,145 @@ def _run_heuristic_rules(
         and not has_any_suspicious_username(payload.usernames_tried)
         and payload.time_to_first_auth > 0.5
     ):
-        return ("real", 0.82, "clean interactive shell with key + human-paced auth")
+        return ("real", 0.85, "clean interactive shell with key + human-paced auth")
 
-    # ---- RULE 18: Default Fallback ----
-    return ("honeypot", 0.60, "no strong signal — safe fallback to honeypot")
+    # ---- RULE 17: Clean Password Login (no spray, clean username, human timing) ----
+    if (
+        payload.auth_attempts_count <= 2
+        and not payload.public_key_attempted
+        and not has_any_suspicious_username(payload.usernames_tried)
+        and payload.time_to_first_auth > 1.0
+        and (payload.shell_requested or not payload.exec_command)
+    ):
+        return ("real", 0.72, "clean password login — human timing + clean username")
+
+    # ---- RULE 18: No strong signal — undecided (let AI decide) ----
+    return ("undecided", 0.50, "no strong signal — deferring to AI tiers")
 
 
-def _run_ml_tier(payload: GatewayScoreRequest) -> tuple[int, float]:
+# ---------------------------------------------------------------------------
+# Tier 2: ML verification (always runs)
+# ---------------------------------------------------------------------------
+
+def _run_ml_tier(signals: dict) -> tuple[int, float, str]:
     if app_state.threat_scorer is None or app_state.threat_scorer.pipeline is None:
-        return (-1, 0.0)
+        return (-1, 0.0, "")
 
     try:
         import numpy as np
 
-        now = datetime.now(CAIRO_TZ)
-        cred_spray = 1.0 if payload.auth_attempts_count >= 4 else 0.0
-        session_duration_s = max(payload.time_to_first_auth or 5.0, 5.0)
-        hour_of_day = float(now.hour)
-        is_weekend = 1.0 if now.weekday() >= 5 else 0.0
-
         feature_vector = [
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            cred_spray,
-            session_duration_s,
-            0.0,
-            hour_of_day,
-            is_weekend,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
+            signals.get("auth_attempts_count", 0),           # cmd_count proxy
+            signals.get("unique_username_count", 0) / 10.0,  # unique_cmd_ratio proxy
+            signals.get("has_exec_command", 0.0),             # download_attempt proxy
+            signals.get("suspicious_exec", 0.0),              # priv_escalation proxy
+            1.0 if signals.get("auth_attempts_count", 0) >= 4 else 0.0,  # credential_spray
+            max(signals.get("time_to_first_auth", 5.0), 5.0),  # session_duration_s
+            max(signals.get("auth_attempts_count", 0) / max(signals.get("time_to_first_auth", 1.0), 1.0), 0.0) * 60.0,  # commands_per_minute proxy
+            signals.get("hour_of_day", 12),                    # hour_of_day
+            signals.get("is_weekend", 0.0),                    # is_weekend
+            0.0,                                              # vpn_detected (post-session only)
+            signals.get("is_deprecated_client", 0.0),          # known_bad_ip proxy
+            signals.get("suspicious_username_count", 0),       # recon_commands proxy
+            signals.get("suspicious_exec", 0.0),               # persistence_attempt proxy
+            signals.get("suspicious_exec", 0.0),               # data_exfil_attempt proxy
+            0.0,                                              # malware_dropped (post-session only)
+            signals.get("auth_method_count", 0) > 1 and 1.0 or 0.0,  # multi_protocol proxy
+            0.0,                                              # canary_triggered (post-session only)
+            0.0,                                              # canary_max_difficulty
+            0.0,                                              # canary_trigger_count
+            0.0,                                              # cumulative_canary_score
+            0.0,                                              # seconds_since_last_event
         ]
 
         pipeline = app_state.threat_scorer.pipeline
         probabilities = pipeline.predict_proba(np.array([feature_vector]))[0]
         level = int(pipeline.predict(np.array([feature_vector]))[0])
         confidence = float(max(probabilities))
+        decision = "honeypot" if level >= 2 else "real"
 
-        return (level, confidence)
+        return (level, confidence, decision)
     except Exception as exc:
         logger.debug("ML pre-session scoring failed: %s", exc)
-        return (-1, 0.0)
+        return (-1, 0.0, "")
 
 
-def _blend_tiers(
-    heuristic_decision: str,
-    heuristic_confidence: float,
+# ---------------------------------------------------------------------------
+# Tier 3: Arbitrate — compare rules vs ML, escalate disagreements to LLM
+# ---------------------------------------------------------------------------
+
+def _arbitrate(
+    rule_decision: str,
+    rule_confidence: float,
+    rule_reason: str,
     ml_level: int,
     ml_confidence: float,
-) -> tuple[str, float]:
+    ml_decision: str,
+) -> tuple[str, float, str, str]:
+    """Returns (decision, confidence, reason, verdict_type).
+
+    verdict_type is 'decided' (route now) or 'inconclusive' (wait for more signals).
+    """
+
+    # ML unavailable → inconclusive, need more signals
     if ml_level < 0:
-        return (heuristic_decision, heuristic_confidence)
+        return ("inconclusive", 0.50, "ML unavailable — need more signals", "inconclusive")
 
-    ml_decision = "honeypot" if ml_level >= 2 else "real"
+    # ---- Heuristic undecided → ML decides alone ----
+    if rule_decision == "undecided":
+        if ml_confidence >= 0.75:
+            return (
+                ml_decision,
+                ml_confidence,
+                f"ML decided {ml_decision} (level={ml_level}, conf={ml_confidence:.2f}) — heuristic undecided",
+                "decided",
+            )
+        return (
+            "inconclusive",
+            ml_confidence,
+            f"heuristic undecided, ML confidence too low ({ml_confidence:.2f} < 0.75)",
+            "inconclusive",
+        )
 
-    if ml_decision == heuristic_decision:
-        conf = min(1.0, max(heuristic_confidence, ml_confidence) + 0.04)
-        return (heuristic_decision, conf)
+    # ---- Both agree → check confidence threshold ----
+    if rule_decision == ml_decision:
+        combined = min(1.0, max(rule_confidence, ml_confidence) + 0.05)
+        if combined >= 0.75:
+            return (
+                rule_decision,
+                combined,
+                f"heuristic ({rule_confidence:.2f}) + ML ({ml_confidence:.2f}) agree → {rule_decision}",
+                "decided",
+            )
+        return (
+            "inconclusive",
+            combined,
+            f"both agree {rule_decision} but confidence too low ({combined:.2f} < 0.75)",
+            "inconclusive",
+        )
 
-    if ml_level >= 3 and ml_confidence > 0.80:
-        return ("honeypot", ml_confidence)
+    # ---- Disagree → inconclusive, need more signals + LLM ----
+    return (
+        "inconclusive",
+        min(rule_confidence, ml_confidence),
+        f"disagreement: heuristic={rule_decision} ({rule_confidence:.2f}) vs ML={ml_decision} ({ml_confidence:.2f})",
+        "inconclusive",
+    )
 
-    if heuristic_confidence < 0.85:
-        conf = max(0.45, heuristic_confidence - 0.08)
-        return (heuristic_decision, conf)
 
-    return (heuristic_decision, heuristic_confidence)
-
-
-def _needs_llm(
-    decision: str,
-    confidence: float,
-    ml_level: int,
-    ml_confidence: float,
-    reason: str,
-) -> bool:
-    if app_state.llm_service is None:
-        return False
-    if confidence > 0.80:
-        return False
-    if ml_level >= 3 and ml_confidence > 0.80:
-        return True
-    if confidence < 0.75:
-        return True
-    if "default" in reason.lower() or "fallback" in reason.lower():
-        return True
-    return False
-
+# ---------------------------------------------------------------------------
+# Tier 4: LLM tiebreaker
+# ---------------------------------------------------------------------------
 
 async def _run_llm_tier(
     payload: GatewayScoreRequest,
-    heuristic_decision: str,
-    heuristic_confidence: float,
-    reason: str,
+    signals: dict,
+    rule_decision: str,
+    rule_confidence: float,
+    rule_reason: str,
     ml_level: int,
+    ml_confidence: float,
+    ml_decision: str,
 ) -> dict | None:
     if app_state.llm_service is None:
         return None
@@ -290,12 +491,13 @@ async def _run_llm_tier(
             f"Publickey attempted: {payload.public_key_attempted}",
             f"Session type: {'interactive shell' if payload.shell_requested else 'exec: ' + (payload.exec_command or 'none')}",
             f"Interactive: {payload.is_interactive}",
-            f"",
-            f"Heuristic result: {heuristic_decision} (confidence: {heuristic_confidence:.2f})",
-            f"Heuristic reason: {reason}",
-            f"ML result: {'level ' + str(ml_level) if ml_level >= 0 else 'not run'}",
-            f"",
-            f"Classify this connection. Return JSON only.",
+            "",
+            f"Heuristic recommendation: {rule_decision} (confidence: {rule_confidence:.2f})",
+            f"Heuristic reason: {rule_reason}",
+            f"ML verdict: {ml_decision} (level={ml_level}, confidence={ml_confidence:.2f})" if ml_level >= 0 else "ML: not available",
+            "",
+            "Heuristic and ML are inconclusive or disagree. You are the final arbiter.",
+            "Classify this connection as 'real' or 'honeypot'. Return JSON only.",
         ]
         prompt = "\n".join(signal_lines)
 
@@ -306,6 +508,10 @@ async def _run_llm_tier(
 
     return None
 
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
 
 async def _check_tor(ip: str) -> bool:
     try:
@@ -333,7 +539,7 @@ def _infer_user_type(decision: str, reason: str) -> str:
         return "brute_force_bot"
     if "suspicious" in lower or "deprecated" in lower:
         return "advanced_attacker"
-    if "default" in lower or "fallback" in lower or "no strong signal" in lower:
+    if "undecided" in lower or "defer" in lower or "inconclusive" in lower:
         return "unknown"
     return "unknown"
 

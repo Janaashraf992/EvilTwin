@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -41,8 +41,12 @@ async def get_score(
 
 
 @router.post("/initial", response_model=GatewayScoreResponse)
-async def score_initial(payload: GatewayScoreRequest) -> GatewayScoreResponse:
+async def score_initial(
+    payload: GatewayScoreRequest,
+    attempt: int = Query(default=1, ge=1, le=2),
+    db: AsyncSession = Depends(get_db),
+) -> GatewayScoreResponse:
     from services.gateway_scorer import classify_connection
 
-    result = await classify_connection(payload)
+    result = await classify_connection(payload, attempt=attempt, db=db)
     return GatewayScoreResponse(**result)
