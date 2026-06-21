@@ -73,7 +73,7 @@ class GatewaySession(asyncssh.SSHServerSession):
                     asyncio.shield(self._server._score_task),
                     timeout=30.0,
                 )
-            except (asyncio.TimeoutError, Exception):
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
                 pass
 
         decision = self._signals.decision
@@ -188,14 +188,14 @@ class GatewaySession(asyncssh.SSHServerSession):
         async def client_to_remote() -> None:
             try:
                 while True:
-                    data = await remote_chan.read(4096)
+                    data = await self._chan.read(4096)
                     if not data:
                         break
-                    self._chan.write(data)
+                    remote_chan.write(data)
             except Exception:
                 pass
             finally:
-                self._chan.write_eof()
+                remote_chan.write_eof()
 
         async def remote_to_client() -> None:
             try:

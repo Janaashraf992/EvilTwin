@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "eviltwin"
     POSTGRES_USER: str = "eviltwin"
-    POSTGRES_PASSWORD: str
+    POSTGRES_PASSWORD: str = "eviltwin"
 
     RYU_REST_URL: str = "http://ryu:8080"
     HONEYPOT_IP: str = "10.0.2.10"
@@ -39,10 +39,10 @@ class Settings(BaseSettings):
     SPLUNK_HEC_URL: Optional[str] = None
     SPLUNK_HEC_TOKEN: Optional[str] = None
 
-    CANARY_WEBHOOK_SECRET: str
+    CANARY_WEBHOOK_SECRET: str = ""
     CANARY_WEBHOOK_TOLERANCE_SECONDS: int = 300
 
-    SECRET_KEY: str
+    SECRET_KEY: str = "change-me-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7

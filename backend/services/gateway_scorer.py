@@ -36,7 +36,6 @@ async def classify_connection(
     is_reconnect = False
     subnet_ip_count = 0
     session_id = None
-    profile_was_new = False
     profile = None
 
     if db is not None:
@@ -96,7 +95,6 @@ async def classify_connection(
         if profile is None:
             profile = AttackerProfile(ip=payload.src_ip)
             db.add(profile)
-            profile_was_new = True
 
         # Reuse session from first pass if this is a re-call
         if recent_gateway is not None and attempt >= 2:
@@ -181,9 +179,9 @@ async def classify_connection(
     # ---- Post-decision DB cleanup ----
     if db is not None and session_id is not None:
         if decision == "real":
-            if profile_was_new and profile is not None:
+            if profile is not None and profile.total_sessions == 0:
                 await db.delete(profile)
-            else:
+            elif session_id is not None:
                 await db.execute(
                     delete(SessionLog).where(SessionLog.id == session_id)
                 )
@@ -560,7 +558,9 @@ async def _run_llm_tier(
                 f"Interactive: {payload.is_interactive}",
                 f"Rapid reconnect: {bool(signals.get('is_rapid_reconnect'))}",
                 f"Known scanner IP: {bool(signals.get('is_known_scanner_ip'))}",
+                f"Tor exit node: {bool(signals.get('is_tor'))}",
                 f"Subnet IPs in 60s: {int(signals.get('subnet_ip_count', 0))}",
+                f"Password entropy: {signals.get('avg_password_entropy', 0):.2f} | Common: {bool(signals.get('has_common_password'))} | Repeating: {bool(signals.get('repeating_password'))} | Rotating: {bool(signals.get('rotating_passwords'))}",
                 f"Hour: {int(signals.get('hour_of_day', 12))} (weekend: {bool(signals.get('is_weekend'))})",
                 "",
                 f"Heuristic recommendation: {rule_decision} (confidence: {rule_confidence:.2f})",
@@ -603,22 +603,39 @@ async def _check_tor(ip: str) -> bool:
 
 def _infer_user_type(decision: str, reason: str) -> str:
     lower = reason.lower()
-    if "whitelist" in lower:
+
+    # Rule-produced reasons — keyword matching works perfectly
+    is_arbitrate = any(
+        w in lower
+        for w in (
+            "agree", "disagreement", "override", "overrule",
+            "ml decided", "llm", "inconclusive", "undecided", "defer",
+        )
+    )
+
+    if not is_arbitrate:
+        if "whitelist" in lower:
+            return "normal_user"
+        if "clean" in lower:
+            return "normal_user"
+        if "scanner" in lower:
+            return "scanner"
+        if "pentester" in lower:
+            return "pentester"
+        if "spray" in lower or "enumeration" in lower:
+            return "credential_stuffer"
+        if "bot" in lower or "automated" in lower:
+            return "brute_force_bot"
+        if "suspicious" in lower or "deprecated" in lower:
+            return "advanced_attacker"
+        if "reconnect" in lower or "multiple" in lower:
+            return "advanced_attacker"
+
+    # Arbitrate / LLM / fallback — use the final decision
+    if decision == "real":
         return "normal_user"
-    if "clean" in lower or "normal" in lower:
-        return "normal_user"
-    if "scanner" in lower or "connect speed" in lower:
-        return "scanner"
-    if "pentester" in lower:
-        return "pentester"
-    if "spray" in lower or "enumeration" in lower or "brute" in lower:
-        return "credential_stuffer"
-    if "bot" in lower or "automated" in lower:
-        return "brute_force_bot"
-    if "suspicious" in lower or "deprecated" in lower:
+    if decision == "honeypot":
         return "advanced_attacker"
-    if "undecided" in lower or "defer" in lower or "inconclusive" in lower:
-        return "unknown"
     return "unknown"
 
 
