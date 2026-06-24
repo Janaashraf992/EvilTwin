@@ -47,11 +47,10 @@ COMMANDS = {
     "whoami": "real",
     "id": "uid=1000(real) gid=1000(real) groups=1000(real)",
     "pwd": "/home/real",
-    "ls": "documents  downloads  portal-access.txt",
+    "ls": "",
     "hostname": "real-server",
     "uname": "Linux",
     "uname -a": "Linux real-server 5.15.0-91-generic #101-Ubuntu SMP x86_64 GNU/Linux",
-    "cat portal-access.txt": f"Authenticated web portal: {PORTAL_URL}",
 }
 
 
@@ -135,7 +134,8 @@ class RealServerSession(asyncssh.SSHServerSession):
         if out is None:
             prog = cmd.split()[0]
             out = COMMANDS.get(prog, f"-bash: {prog}: command not found")
-        self._chan.write(out + "\r\n")
+        if out:
+            self._chan.write(out + "\r\n")
         return False
 
     def _prompt(self) -> None:
