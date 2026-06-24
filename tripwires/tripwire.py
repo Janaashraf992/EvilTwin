@@ -13,9 +13,11 @@ import os
 import socket
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-CAIRO_TZ = timezone(timedelta(hours=2))
+CAIRO_TZ = ZoneInfo("Africa/Cairo")
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
@@ -41,6 +43,7 @@ except json.JSONDecodeError:
     TOKEN_MAP = {}
 
 _last_triggered: dict[str, float] = {}
+_trigger_lock = threading.Lock()
 
 
 def _resolve_token_id(http_path: str) -> str:
@@ -63,11 +66,11 @@ def compute_signature(payload: str) -> str:
 def fire_webhook(event_path: str, event_type: str, src_ip: str = "", user_agent: str = "", token_id: str = "") -> bool:
     now = time.time()
     key = f"{event_path}_{event_type}"
-    if key in _last_triggered:
-        if now - _last_triggered[key] < COOLDOWN_SECONDS:
-            return False
-
-    _last_triggered[key] = now
+    with _trigger_lock:
+        if key in _last_triggered:
+            if now - _last_triggered[key] < COOLDOWN_SECONDS:
+                return False
+        _last_triggered[key] = now
 
     effective_token = token_id or TOKEN_ID
 
@@ -84,6 +87,7 @@ def fire_webhook(event_path: str, event_type: str, src_ip: str = "", user_agent:
         "timestamp": ts,
         "src_ip": src_ip,
         "user_agent": ua,
+        "nonce": uuid.uuid4().hex,
         "signature": ""
     }
     payload = json.dumps(body, separators=(",", ":"))
@@ -117,7 +121,10 @@ class TripwireHandler(FileSystemEventHandler):
     def on_any_event(self, event: FileSystemEvent) -> None:
         if event.is_directory:
             return
-        if event.event_type in ("opened", "modified", "moved", "deleted", "created", "closed"):
+        # Only react to tampering. "opened"/"closed" events are also emitted when
+        # this process serves a file over HTTP, which would double-fire alongside
+        # the do_GET webhook — so they are intentionally excluded.
+        if event.event_type in ("modified", "moved", "deleted", "created"):
             logger.info("TRIGGERED: %s -> %s", event.event_type, event.src_path)
             rel = str(Path(event.src_path).relative_to(WATCH_DIR))
             http_path = "/" + rel.replace("\\", "/")
@@ -154,6 +161,14 @@ class BaitHTTPHandler(SimpleHTTPRequestHandler):
             )
 
         super().do_GET()
+
+    def list_directory(self, path):
+        # Autoindex is disabled: the only openly discoverable bait is the benign
+        # index page (the "Public Web Bug"). Higher-difficulty baits live at
+        # explicit, unlisted paths (e.g. /.git/, /.env.production) so they must
+        # be discovered, not browsed.
+        self.send_error(404, "Not Found")
+        return None
 
     def _client_ip(self) -> str:
         forwarded = self.headers.get("X-Forwarded-For", "")

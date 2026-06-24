@@ -1,4 +1,6 @@
 from datetime import timedelta
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,7 +51,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
             headers={"WWW-Authenticate": "Bearer"},
         )
     if not user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
+        raise HTTPException(status_code=403, detail="Inactive user")
 
     access_token = create_access_token(subject=user.id)
     refresh_token = create_refresh_token(subject=user.id)
@@ -76,7 +78,12 @@ async def refresh_token(body: RefreshTokenRequest, db: AsyncSession = Depends(ge
     except JWTError:
         raise credentials_exception
 
-    result = await db.execute(select(User).where(User.id == user_id_str))
+    try:
+        user_uuid = uuid.UUID(user_id_str)
+    except (ValueError, AttributeError):
+        raise credentials_exception
+
+    result = await db.execute(select(User).where(User.id == user_uuid))
     user = result.scalar_one_or_none()
     if not user or not user.is_active:
         raise credentials_exception

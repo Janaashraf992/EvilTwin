@@ -4,7 +4,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import cast, delete, select
+from sqlalchemy.dialects.postgresql import INET as PG_INET
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import CAIRO_TZ, get_settings
@@ -39,13 +40,13 @@ async def classify_connection(
     profile = None
 
     if db is not None:
-        now_dt = datetime.now(CAIRO_TZ)
+        now_dt = datetime.now(CAIRO_TZ).replace(tzinfo=None)
         window_start = now_dt - timedelta(seconds=60)
 
         # Clean up stale gateway sessions (abandoned pass-1 sessions >5min old)
         await db.execute(
             delete(SessionLog).where(
-                SessionLog.attacker_ip == payload.src_ip,
+                SessionLog.attacker_ip == cast(payload.src_ip, PG_INET),
                 SessionLog.honeypot == "gateway",
                 SessionLog.start_time < now_dt - timedelta(minutes=5),
             )
@@ -54,7 +55,7 @@ async def classify_connection(
         # R12: ANY recent session from this IP (gateway, cowrie, dionaea — all of them)
         result = await db.execute(
             select(SessionLog.id).where(
-                SessionLog.attacker_ip == payload.src_ip,
+                SessionLog.attacker_ip == cast(payload.src_ip, PG_INET),
                 SessionLog.start_time >= window_start,
             ).limit(1)
         )
@@ -63,7 +64,7 @@ async def classify_connection(
         # Session reuse: only gateway sessions (re-call from the same connection)
         result = await db.execute(
             select(SessionLog).where(
-                SessionLog.attacker_ip == payload.src_ip,
+                SessionLog.attacker_ip == cast(payload.src_ip, PG_INET),
                 SessionLog.start_time >= window_start,
                 SessionLog.honeypot == "gateway",
             ).order_by(SessionLog.start_time.desc()).limit(1)
@@ -89,7 +90,7 @@ async def classify_connection(
 
         # Get or create AttackerProfile
         result = await db.execute(
-            select(AttackerProfile).where(AttackerProfile.ip == payload.src_ip)
+            select(AttackerProfile).where(AttackerProfile.ip == cast(payload.src_ip, PG_INET))
         )
         profile = result.scalar_one_or_none()
         if profile is None:
@@ -116,7 +117,7 @@ async def classify_connection(
             await db.flush()
             session_id = session.id
     else:
-        now_dt = datetime.now(CAIRO_TZ)
+        now_dt = datetime.now(CAIRO_TZ).replace(tzinfo=None)
 
     llm_used = False
     llm_explanation = ""
@@ -210,7 +211,7 @@ async def classify_connection(
 # ---------------------------------------------------------------------------
 
 def _extract_signals(payload: GatewayScoreRequest, is_reconnect: bool) -> dict:
-    now = datetime.now(CAIRO_TZ)
+    now = datetime.now(CAIRO_TZ).replace(tzinfo=None)
     unique_usernames = list({u.lower() for u in payload.usernames_tried})
 
     # Password analysis

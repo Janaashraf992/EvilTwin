@@ -14,7 +14,7 @@ services:
     networks:
       - eviltwin-net
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eviltwin} -d ${POSTGRES_DB:-eviltwin}"]
       interval: 10s
@@ -25,6 +25,7 @@ services:
 
   # ============================================================================
   # SSH Gateway — AI Pre-Screen + Routing Decision
+  # For real client IPs on Windows, run .\gateway\run-native.ps1 instead.
   # ============================================================================
   gateway:
     build:
@@ -33,12 +34,14 @@ services:
     container_name: eviltwin-gateway
     environment:
       BACKEND_URL: ${GATEWAY_BACKEND_URL:-http://backend:8000}
-      REAL_SSH_HOST: ${REAL_SSH_HOST:-10.0.1.20}
+      SDN_REST_URL: ${SDN_REST_URL:-http://ryu:8080}
+      ROUTING_API_KEY: ${ROUTING_API_KEY:-}
+      REAL_SSH_HOST: ${REAL_SSH_HOST:-dummy-real}
       REAL_SSH_PORT: ${REAL_SSH_PORT:-22}
-      REAL_SSH_USER: ${REAL_SSH_USER:-gateway}
-      REAL_SSH_PASSWORD: ${REAL_SSH_PASSWORD:-gateway}
+      REAL_SSH_USER: ${REAL_SSH_USER:-real}
+      REAL_SSH_PASSWORD: ${REAL_SSH_PASSWORD:-eviltwin}
       HONEYPOT_HOST: ${GATEWAY_HONEYPOT_HOST:-cowrie}
-      HONEYPOT_PORT: ${GATEWAY_HONEYPOT_PORT:-22}
+      HONEYPOT_PORT: ${GATEWAY_HONEYPOT_PORT:-2222}
       AUTH_COLLECT_WINDOW_S: ${AUTH_COLLECT_WINDOW_S:-5.0}
       BACKEND_TIMEOUT: ${GATEWAY_BACKEND_TIMEOUT:-2.0}
       GATEWAY_LISTEN_PORT: "22"
@@ -64,7 +67,7 @@ services:
       dockerfile: Dockerfile
     container_name: eviltwin-cowrie
     volumes:
-      - cowrie-logs:/cowrie/var/log/cowrie
+      - cowrie-logs:/cowrie/cowrie-git/var/log/cowrie
       - cowrie-downloads:/cowrie/var/lib/cowrie/downloads
     networks:
       - deception-net
@@ -109,8 +112,8 @@ services:
     networks:
       - eviltwin-net
     ports:
-      - "6633:6633"
-      - "8080:8080"
+      - "127.0.0.1:6633:6633"
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
     depends_on:
       backend:
@@ -144,9 +147,20 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-4096}
+      LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.2}
+      ALGORITHM: ${ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      CANARY_WEBHOOK_TOLERANCE_SECONDS: ${CANARY_WEBHOOK_TOLERANCE_SECONDS:-300}
+      PRE_SESSION_MODEL_PATH: ${PRE_SESSION_MODEL_PATH:-/app/ai/pre_session_model.pkl}
+      REAL_NET_CIDR: ${REAL_NET_CIDR:-10.0.1.0/24}
       GATEWAY_WHITELIST_CIDRS: ${GATEWAY_WHITELIST_CIDRS:-}
       PENTEST_CIDRS: ${PENTEST_CIDRS:-}
       SERVICE_ACCOUNT_USERNAME_PATTERNS: ${SERVICE_ACCOUNT_USERNAME_PATTERNS:-}
+      ROUTING_API_KEY: ${ROUTING_API_KEY:-}
+      ROUTING_BYPASS_IPS: ${ROUTING_BYPASS_IPS:-127.0.0.1,::1}
       DEMO_BOOTSTRAP: ${DEMO_BOOTSTRAP:-true}
       DEMO_USER_EMAIL: ${DEMO_USER_EMAIL:-analyst@eviltwin.local}
       DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-eviltwin-demo}
@@ -160,7 +174,7 @@ services:
       - eviltwin-net
       - deception-net
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -185,8 +199,9 @@ services:
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8000/ws/alerts}
     networks:
       - eviltwin-net
-    ports:
-      - "3000:3000"
+    # Admin dashboard — intentionally NOT published to any host port.
+    # Reachable only via the nginx reverse proxy on the internal network
+    # (upstream frontend -> frontend:3000). Hidden from all port scans.
     restart: unless-stopped
     depends_on:
       backend:
@@ -231,11 +246,12 @@ services:
     volumes:
       - splunk-etc:/opt/splunk/etc
       - splunk-var:/opt/splunk/var
+      - ./splunk-apps/eviltwin_index:/opt/splunk/etc/apps/eviltwin_index
     networks:
       - eviltwin-net
     ports:
-      - "18000:8000"
-      - "18088:8088"
+      - "127.0.0.1:18000:8000"
+      - "127.0.0.1:18088:8088"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/en-US/account/login"]
@@ -259,7 +275,7 @@ services:
     networks:
       - eviltwin-net
     ports:
-      - "8089:8088"
+      - "127.0.0.1:8089:8088"
     restart: unless-stopped
 
   # ============================================================================
@@ -269,7 +285,7 @@ services:
     build: ./tripwires
     container_name: eviltwin-tripwire
     ports:
-      - "8082:8080"
+      - "127.0.0.1:8082:8080"
     environment:
       CANARY_WEBHOOK_URL: http://backend:8000/webhook/canary
       CANARY_WEBHOOK_SECRET: ${CANARY_WEBHOOK_SECRET}
@@ -284,6 +300,66 @@ services:
       - eviltwin-net
     depends_on:
       backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ============================================================================
+  # Dummy Real Server — shows "You are a normal user" for real decisions
+  # SSH (22): shows Ubuntu banner + terminal prompt
+  # HTTP (8080): shows authenticated web page
+  # ============================================================================
+  dummy-real:
+    build: ./dummy-real
+    container_name: eviltwin-dummy-real
+    environment:
+      REAL_SSH_USER: ${REAL_SSH_USER:-gateway}
+      REAL_SSH_PASSWORD: ${REAL_SSH_PASSWORD:-gateway}
+      LISTEN_PORT: "22"
+      HTTP_PORT: "8080"
+    networks:
+      - eviltwin-net
+    ports:
+      - "127.0.0.1:8022:22"
+      - "127.0.0.1:8088:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # ============================================================================
+  # HTTP Gateway — per-IP routing (real vs honeypot) for HTTP traffic.
+  # Same pattern as SSH gateway: queries backend routing table, proxies to
+  # dummy-real:8080 for legitimate users, serves deceptive page for attackers.
+  # ============================================================================
+  http-gateway:
+    build: ./http-gateway
+    container_name: eviltwin-http-gw
+    environment:
+      ROUTING_BACKEND_URL: ${ROUTING_BACKEND_URL:-http://backend:8000}
+      REAL_HTTP_URL: ${REAL_HTTP_URL:-http://dummy-real:8080}
+      HTTP_GATEWAY_PORT: "80"
+      ROUTING_API_KEY: ${ROUTING_API_KEY:-}
+      INGEST_BACKEND_URL: ${INGEST_BACKEND_URL:-http://backend:8000}
+      REAL_HTTP_USER: ${REAL_HTTP_USER:-real}
+      REAL_HTTP_PASSWORD: ${REAL_HTTP_PASSWORD:-eviltwin}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - eviltwin-net
+    ports:
+      - "${HTTP_GATEWAY_PORT:-8888}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+      dummy-real:
         condition: service_healthy
     restart: unless-stopped
 

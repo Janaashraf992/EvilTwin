@@ -28,6 +28,7 @@ class SessionSignals:
     _last_auth_time: float = field(default_factory=time.monotonic, init=False)
     _decision_made: bool = field(default=False, init=False)
     _decision: Optional[str] = field(default=None, init=False)
+    _fast_routed: bool = field(default=False, init=False)
 
     def record_connect(self, client_version: str, kex_algs: str) -> None:
         self._connect_time = time.monotonic()
@@ -103,6 +104,13 @@ class SessionSignals:
     @property
     def decision(self) -> Optional[str]:
         return self._decision
+
+    @property
+    def fast_routed(self) -> bool:
+        return self._fast_routed
+
+    def mark_fast_routed(self) -> None:
+        self._fast_routed = True
 
     def to_payload(self) -> dict:
         return {

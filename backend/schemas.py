@@ -3,10 +3,33 @@ Pydantic schemas for request validation and response serialization.
 """
 
 from datetime import datetime
-from typing import Optional, List
+from typing import Annotated, Optional, List
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, IPvAnyAddress
+from pydantic import BaseModel, ConfigDict, IPvAnyAddress, PlainSerializer
+
+from config import CAIRO_TZ
+
+
+def _serialize_cairo(dt: datetime) -> str:
+    """Serialize datetimes in DST-aware Africa/Cairo local time.
+
+    Naive values are assumed to already be Cairo wall-clock; aware values are
+    converted. This guarantees every API timestamp carries the correct Cairo
+    offset (+03:00 in summer, +02:00 in winter) instead of an ambiguous bare
+    timestamp the frontend would have to guess at.
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=CAIRO_TZ)
+    else:
+        dt = dt.astimezone(CAIRO_TZ)
+    return dt.isoformat()
+
+
+CairoDateTime = Annotated[
+    datetime,
+    PlainSerializer(_serialize_cairo, return_type=str, when_used="json"),
+]
 
 # --- Auth Schemas ---
 
@@ -19,8 +42,8 @@ class UserResponse(BaseModel):
     email: str
     is_active: bool
     role: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: CairoDateTime
+    updated_at: CairoDateTime
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -48,7 +71,7 @@ class LoginRequest(BaseModel):
 
 class CommandSchema(BaseModel):
     """Schema for a command executed in a honeypot session."""
-    timestamp: datetime
+    timestamp: CairoDateTime
     command: str
     output: Optional[str] = None
 
@@ -97,8 +120,8 @@ class SessionResponse(BaseModel):
     attacker_ip: str
     honeypot: str
     protocol: str
-    start_time: datetime
-    end_time: Optional[datetime]
+    start_time: CairoDateTime
+    end_time: Optional[CairoDateTime]
     commands: List[CommandSchema]
     credentials_tried: List[CredentialSchema]
     malware_hashes: List[str]
@@ -130,7 +153,7 @@ class AlertResponse(BaseModel):
     attacker_ip: str
     threat_level: int
     message: str
-    created_at: datetime
+    created_at: CairoDateTime
     acknowledged: bool
     acknowledged_by: Optional[str]
 
@@ -156,6 +179,7 @@ class CanaryWebhookRequest(BaseModel):
     timestamp: datetime
     src_ip: IPvAnyAddress
     user_agent: Optional[str] = None
+    nonce: Optional[str] = None  # unique per request; keeps signatures distinct for replay protection
     signature: str
 
 
@@ -176,8 +200,8 @@ class CanaryTokenResponse(BaseModel):
     token_kind: str
     difficulty: int
     score_value: float
-    created_at: datetime
-    last_triggered_at: Optional[datetime]
+    created_at: CairoDateTime
+    last_triggered_at: Optional[CairoDateTime]
     trigger_count: int
     is_active: bool
     webhook_url: str  # computed field — the URL to configure in canarytokens.org or similar

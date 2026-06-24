@@ -528,6 +528,7 @@ def train():
         learning_rate=0.05,
         random_seed=42,
         verbose=False,
+        allow_writing_files=False,
     )
     ensemble = VotingClassifier(
         estimators=[("lr", lr), ("gb", gb), ("cb", cb)],

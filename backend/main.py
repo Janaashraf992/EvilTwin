@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import sys
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -8,12 +10,20 @@ from sqlalchemy import text
 
 from config import CAIRO_TZ, get_settings
 from database import close_db, get_db_context, init_db
-from routers import alerts, canary, dashboard, health, ingest, scoring, sessions, auth
+from routers import alerts, canary, dashboard, health, ingest, scoring, sessions, auth, routing
 from routers import ai as ai_router
 from routers import splunk as splunk_router
 from services.cowrie import watch_cowrie_log
 from services.dionaea import watch_dionaea_log
 from state import app_state
+
+_logging_settings = get_settings()
+logging.basicConfig(
+    level=getattr(logging, _logging_settings.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
+    stream=sys.stdout,
+    force=True,
+)
 
 
 @asynccontextmanager
@@ -37,11 +47,13 @@ async def lifespan(_: FastAPI):
         app_state.splunk_forwarder = SplunkForwarder(
             settings.SPLUNK_HEC_URL, settings.SPLUNK_HEC_TOKEN
         )
-        async def _startup_sync():
+
+        async def _splunk_startup():
+            reachable = await app_state.splunk_forwarder.warmup_check(retries=5, delay=3.0)
             from routers.splunk import splunk_startup_sync
             async with get_db_context() as db:
                 await splunk_startup_sync(db)
-        background_tasks.append(asyncio.create_task(_startup_sync()))
+        background_tasks.append(asyncio.create_task(_splunk_startup()))
 
     if settings.LLM_API_KEY:
         app_state.llm_service = LLMService(
@@ -97,6 +109,10 @@ async def lifespan(_: FastAPI):
             await app_state.llm_service.close()
             app_state.llm_service = None
 
+        if app_state.threat_scorer is not None:
+            app_state.threat_scorer.close()
+            app_state.threat_scorer = None
+
         await close_db()
 
 
@@ -133,5 +149,6 @@ app.include_router(scoring.router)
 app.include_router(alerts.router)
 app.include_router(dashboard.router)
 app.include_router(canary.router)
+app.include_router(routing.router)
 app.include_router(ai_router.router)
 app.include_router(splunk_router.router)

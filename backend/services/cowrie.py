@@ -88,6 +88,7 @@ async def process_cowrie_log_line(
     db_factory: DbFactory = _default_db_factory,
     runtime_state: AppState = app_state,
     ingest_handler: IngestHandler = ingest_event,
+    _seen_sessions: set[str] | None = None,
 ) -> bool:
     try:
         raw_event = json.loads(line)
@@ -98,6 +99,15 @@ async def process_cowrie_log_line(
     payload = parse_cowrie_event(raw_event, honeypot_ip)
     if payload is None:
         return False
+
+    # Skip duplicate ingestion on log rotation re-read
+    session_key = f"{payload.src_ip}:{payload.session}"
+    if _seen_sessions is not None:
+        if session_key in _seen_sessions:
+            return True  # already processed — skip without error
+        _seen_sessions.add(session_key)
+        if len(_seen_sessions) > 5000:
+            _seen_sessions.clear()
 
     async with db_factory() as db:
         await ingest_handler(payload, db, runtime_state)
@@ -116,6 +126,7 @@ async def watch_cowrie_log(
 ) -> None:
     path = Path(log_path)
     offset: int | None = None
+    seen_sessions: set[str] = set()
 
     while True:
         try:
@@ -146,6 +157,7 @@ async def watch_cowrie_log(
                         db_factory=db_factory,
                         runtime_state=runtime_state,
                         ingest_handler=ingest_handler,
+                        _seen_sessions=seen_sessions,
                     )
         except asyncio.CancelledError:
             raise

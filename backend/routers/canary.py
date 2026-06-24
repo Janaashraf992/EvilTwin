@@ -7,26 +7,21 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import CAIRO_TZ, cairo_iso, get_settings
+from config import CAIRO_TZ, get_settings
 from database import get_db
 from deps import get_current_user
-from ip_utils import is_private_or_reserved
-from models import Alert, AttackerProfile, CanaryToken, SessionLog, User
+from models import CanaryToken, User
 from schemas import (
     CanaryTokenCreate,
     CanaryTokenListResponse,
     CanaryTokenResponse,
     CanaryWebhookRequest,
 )
+from services.canary import default_score_value, trigger_canary
 from services.canary_webhook import validate_canary_signature
 from state import app_state
 
 router = APIRouter(tags=["canary"])
-
-
-def _default_score_value(difficulty: int) -> float:
-    mapping = {0: 0.05, 1: 0.15, 2: 0.25, 3: 0.40, 4: 0.60}
-    return mapping.get(difficulty, 0.15)
 
 
 # ---------------------------------------------------------------------------
@@ -35,8 +30,9 @@ def _default_score_value(difficulty: int) -> float:
 
 def _token_to_response(token: CanaryToken) -> CanaryTokenResponse:
     settings = get_settings()
-    webhook_url = f"{settings.VITE_API_BASE_URL}/webhook/canary"
-    sv = token.score_value if token.score_value > 0 else _default_score_value(token.difficulty)
+    backend_url = getattr(settings, "BACKEND_URL", settings.VITE_API_BASE_URL)
+    webhook_url = f"{backend_url}/webhook/canary"
+    sv = token.score_value if token.score_value > 0 else default_score_value(token.difficulty)
     return CanaryTokenResponse(
         id=token.id,
         label=token.label,
@@ -81,7 +77,7 @@ async def create_canary_token(
         description=body.description,
         token_kind=body.token_kind,
         difficulty=body.difficulty,
-        score_value=body.score_value if body.score_value > 0 else _default_score_value(body.difficulty),
+        score_value=body.score_value if body.score_value > 0 else default_score_value(body.difficulty),
         created_at=datetime.now(CAIRO_TZ).replace(tzinfo=None),
         trigger_count=0,
         is_active=True,
@@ -130,101 +126,17 @@ async def ingest_canary(
     ):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
-    # Update trigger stats on the registered token if it exists
-    token_id_str = payload.token_id
-    registered_token = None
-    try:
-        token_uuid = uuid.UUID(token_id_str)
-        registered_token = await db.get(CanaryToken, token_uuid)
-        if registered_token is not None:
-            registered_token.trigger_count = (registered_token.trigger_count or 0) + 1
-            registered_token.last_triggered_at = datetime.now(CAIRO_TZ).replace(tzinfo=None)
-    except (ValueError, AttributeError):
-        pass  # token_id is not a UUID — external token, proceed normally
-
-    threat_level = registered_token.difficulty if registered_token is not None else 3
-
-    ip = str(payload.src_ip)
-
-    if is_private_or_reserved(ip):
-        raise HTTPException(status_code=422, detail=f"Rejected private/reserved IP: {ip}")
-
-    now = datetime.now(CAIRO_TZ).replace(tzinfo=None)
-    profile = await db.get(AttackerProfile, ip)
-    if profile is None:
-        profile = AttackerProfile(
-            ip=ip,
-            first_seen=now,
-            last_seen=now,
-            total_sessions=1,
-        )
-        db.add(profile)
-    else:
-        profile.last_seen = now
-        profile.total_sessions = (profile.total_sessions or 0) + 1
-
-    diff = registered_token.difficulty if registered_token is not None else 3
-    token_score_val = (registered_token.score_value if registered_token is not None and registered_token.score_value > 0
-                       else _default_score_value(diff))
-    profile.canary_triggered = True
-    profile.canary_max_difficulty = max(profile.canary_max_difficulty or 0, diff)
-    profile.canary_trigger_count = (profile.canary_trigger_count or 0) + 1
-    profile.cumulative_canary_score = min(1.0, (profile.cumulative_canary_score or 0.0) + token_score_val)
-
-    session = SessionLog(
-        id=uuid.uuid4(),
-        attacker_ip=ip,
-        honeypot="canary",
-        protocol="http",
-        start_time=payload.timestamp.replace(tzinfo=None),
-        end_time=payload.timestamp.replace(tzinfo=None),
-        commands=[],
-        credentials_tried=[],
-        malware_hashes=[],
+    alert = await trigger_canary(
+        db,
+        payload.token_id,
+        str(payload.src_ip),
+        timestamp=payload.timestamp,
+        source="webhook",
+        user_agent=payload.user_agent or "",
         raw_log=payload.model_dump(mode="json"),
+        runtime_state=app_state,
     )
-    db.add(session)
-    await db.flush()
-
-    if app_state.threat_scorer:
-        score, level = await app_state.threat_scorer.score(
-            session, profile, multi_protocol=False, known_bad_ip=bool(profile.vpn_detected)
-        )
-    else:
-        score, level = 0.0, 0
-
-    additive_score = min(1.0, (profile.threat_score or 0.0) + token_score_val)
-    profile.threat_score = max(score, additive_score)
-    profile.threat_level = max(level, diff, profile.threat_level or 0)
-    await db.flush()
-
-    alert = Alert(
-        session_id=session.id,
-        attacker_ip=ip,
-        threat_level=level,
-        message=f"Canary token triggered: {payload.token_id}",
-    )
-    db.add(alert)
-    await db.flush()
     await db.commit()
 
-    alert_data = {
-        "id": str(alert.id),
-        "session_id": str(session.id),
-        "attacker_ip": ip,
-        "threat_level": alert.threat_level,
-        "message": alert.message,
-        "created_at": cairo_iso(alert.created_at) if alert.created_at else cairo_iso(datetime.now(CAIRO_TZ)),
-        "acknowledged": False,
-    }
-
-    await app_state.alert_manager.broadcast(alert_data)
-
-    if app_state.splunk_forwarder:
-        await app_state.splunk_forwarder.send_event(
-            {**alert_data, "raw_log": payload.model_dump(mode="json")},
-            source="eviltwin-canary",
-        )
-
-    return {"status": "ok", "alert_id": str(alert.id)}
+    return {"status": "ok", "alert_id": str(alert.id) if alert else None}
 

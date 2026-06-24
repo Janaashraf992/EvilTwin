@@ -38,6 +38,7 @@ COPY --from=python-builder /root/.local /usr/local
 COPY backend/ .
 
 RUN python -m ai.train
+RUN python -m ai.train_pre_session
 
 RUN mkdir -p /var/log/supervisor /var/log/eviltwin /run/postgresql \
     && chown -R postgres:postgres /run/postgresql \

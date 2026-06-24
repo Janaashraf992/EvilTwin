@@ -173,43 +173,55 @@ async def seed_demo_data(session: Any, settings: Settings) -> None:
                 )
                 session.add(alert)
 
+# Canary tokens form a graduated "level" ladder. Each one lives on a different
+# surface whose real access difficulty matches its declared difficulty:
+#   L0 open HTTP listing → L1 unlisted HTTP → L2 anon FTP →
+#   L3 leaked /.git → L4 SSH /tmp → L5 SSH /root.
 _CANARY_TOKENS = [
     {
         "id": "095a6bfa-9fbe-4a1f-b4fb-a1afa971cd98",
-        "label": "Public Web Bug",
-        "description": "Benign URL token — anyone can trigger, low value",
+        "label": "Public Web Bug (open HTTP)",
+        "description": "Benign tracking pixel on the tripwire HTTP server (8082); any open browse fires it.",
         "token_kind": "url",
         "difficulty": 0,
         "score_value": 0.05,
     },
     {
         "id": "19eee70f-aefd-4afb-ab06-3598d374876b",
-        "label": "Honeypot HTTP Banner",
-        "description": "Exposed tripwire HTTP server on port 8082",
-        "token_kind": "url",
+        "label": "Exposed passwords.txt (HTTP honeypot)",
+        "description": "Credential list reachable via the Dionaea HTTP honeypot (port 8081) at an unadvertised path.",
+        "token_kind": "file",
         "difficulty": 1,
         "score_value": 0.15,
     },
     {
         "id": "083ee719-79d9-4174-b471-076ecc4248d7",
-        "label": "Fake AWS Keys in Repo",
-        "description": "AWS keys planted in a public Git repo",
+        "label": "AWS keys via anonymous FTP",
+        "description": "aws_credentials retrievable over the Dionaea anonymous FTP honeypot (port 2121).",
         "token_kind": "aws_key",
         "difficulty": 2,
         "score_value": 0.25,
     },
     {
+        "id": "b1d9f0c2-3a4e-4c7b-9f21-5d6e7a8b9c0d",
+        "label": ".env in leaked .git repo",
+        "description": "Production .env.production leaked via an exposed /.git/ on the tripwire (8082).",
+        "token_kind": "file",
+        "difficulty": 3,
+        "score_value": 0.40,
+    },
+    {
         "id": "e8ca06a6-7123-4a08-9262-38c347248e51",
-        "label": "Staging Database Dump",
-        "description": "SQL backup left in /tmp/ on internal server",
+        "label": "Staging DB dump in /tmp (SSH)",
+        "description": "database_backup.sql planted in /tmp/ in the Cowrie SSH honeypot (2222).",
         "token_kind": "file",
         "difficulty": 3,
         "score_value": 0.40,
     },
     {
         "id": "7aedcaf0-b627-4f6f-95e8-5e59d891147e",
-        "label": "Root SSH Private Key",
-        "description": "id_rsa planted in /root/.ssh/ — root-level breach",
+        "label": "Root SSH key in /root/.ssh (SSH)",
+        "description": "id_rsa planted in /root/.ssh/ inside the Cowrie SSH honeypot (port 2222) — root-level breach.",
         "token_kind": "file",
         "difficulty": 4,
         "score_value": 0.60,
@@ -225,11 +237,18 @@ async def ensure_canary_tokens(session: Any) -> int:
     for ct in _CANARY_TOKENS:
         existing = await session.get(CanaryToken, uuid.UUID(ct["id"]))
         if existing is not None:
+            changed = False
+            for attr in ("label", "description", "token_kind", "difficulty"):
+                if getattr(existing, attr) != ct[attr]:
+                    setattr(existing, attr, ct[attr])
+                    changed = True
             if existing.score_value == 0.0 and ct["score_value"] > 0:
                 existing.score_value = ct["score_value"]
-                seeded += 1
+                changed = True
             if not existing.is_active:
                 existing.is_active = True
+                changed = True
+            if changed:
                 seeded += 1
             continue
         token = CanaryToken(
@@ -248,7 +267,7 @@ async def ensure_canary_tokens(session: Any) -> int:
 
     all_tokens = (await session.execute(select(CanaryToken))).scalars().all()
     for t in all_tokens:
-        if t.id not in canonical_ids:
+        if t.id not in canonical_ids and t.trigger_count == 0:
             await session.delete(t)
             seeded += 1
             logger.info("Removed orphan token: %s (%s)", t.label, t.id)

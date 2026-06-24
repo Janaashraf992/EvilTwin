@@ -52,7 +52,11 @@ def _coerce_timestamp(value: Any) -> datetime:
     if isinstance(value, str):
         normalized = value.strip().replace("Z", "+00:00")
         if normalized:
-            parsed = datetime.fromisoformat(normalized)
+            try:
+                parsed = datetime.fromisoformat(normalized)
+            except ValueError:
+                epoch = float(normalized)
+                return datetime.fromtimestamp(epoch, tz=CAIRO_TZ)
             if parsed.tzinfo is None:
                 return parsed.replace(tzinfo=CAIRO_TZ)
             return parsed.astimezone(CAIRO_TZ)
@@ -175,7 +179,11 @@ def _build_payload(
     if password is not None:
         payload["password"] = password
 
-    return LogIngestRequest.model_validate(payload)
+    try:
+        return LogIngestRequest.model_validate(payload)
+    except Exception:
+        logger.debug("Skipping invalid Dionaea event: %s", payload.get("eventid", "?"))
+        return None
 
 
 def _incident_base_payload(
@@ -499,25 +507,49 @@ async def process_dionaea_log_line(
     db_factory: DbFactory = _default_db_factory,
     runtime_state: AppState = app_state,
     ingest_handler: IngestHandler = ingest_event,
+    _seen_sessions: set[str] | None = None,
 ) -> bool:
-    try:
-        raw_event = json.loads(line)
-    except json.JSONDecodeError:
-        logger.warning("Skipping invalid Dionaea log line")
+    import asyncio as _asyncio
+    decoder = json.JSONDecoder()
+    pos = 0
+    processed = False
+    line_stripped = line.strip()
+    if not line_stripped:
         return False
 
-    payloads = parse_dionaea_event(raw_event, honeypot_ip)
-    if not payloads:
-        return False
+    while pos < len(line_stripped):
+        try:
+            raw_event, end = decoder.raw_decode(line_stripped, pos)
+            pos = end
+        except json.JSONDecodeError:
+            if pos == 0:
+                logger.warning("Skipping invalid Dionaea log line")
+            break
 
-    async with db_factory() as db:
-        for payload in payloads:
-            await ingest_handler(payload, db, runtime_state)
-            flush = getattr(db, "flush", None)
-            if callable(flush):
-                await flush()
+        payloads = parse_dionaea_event(raw_event, honeypot_ip)
+        if not payloads:
+            continue
 
-    return True
+        # Skip duplicate ingestion on log rotation re-read
+        session_key = f"{payloads[0].src_ip}:{payloads[0].session}"
+        if _seen_sessions is not None:
+            if session_key in _seen_sessions:
+                continue
+            _seen_sessions.add(session_key)
+            if len(_seen_sessions) > 5000:
+                _seen_sessions.clear()
+
+        async with db_factory() as db:
+            for payload in payloads:
+                await ingest_handler(payload, db, runtime_state)
+                flush = getattr(db, "flush", None)
+                if callable(flush):
+                    await flush()
+
+        processed = True
+        await _asyncio.sleep(0)
+
+    return processed
 
 
 async def watch_dionaea_log(
@@ -531,6 +563,9 @@ async def watch_dionaea_log(
 ) -> None:
     path = Path(log_path)
     offset: int | None = None
+    seen_sessions: set[str] = set()
+    logger.info("Dionaea log watcher starting: %s", log_path)
+    logger.setLevel(logging.INFO)  # Ensure visibility
 
     while True:
         try:
@@ -561,6 +596,7 @@ async def watch_dionaea_log(
                         db_factory=db_factory,
                         runtime_state=runtime_state,
                         ingest_handler=ingest_handler,
+                        _seen_sessions=seen_sessions,
                     )
         except asyncio.CancelledError:
             raise

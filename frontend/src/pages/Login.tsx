@@ -137,7 +137,7 @@ export const Login = () => {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full relative flex items-center justify-center space-x-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white p-3 rounded-xl font-medium tracking-wide shadow-[0_0_20px_rgba(220,38,38,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden mt-6"
+              className="group w-full relative flex items-center justify-center space-x-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white p-3 rounded-xl font-medium tracking-wide shadow-[0_0_20px_rgba(220,38,38,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden mt-6"
             >
               <div className="absolute inset-0 bg-white/20 translate-y-[-100%] transition-transform group-hover:translate-y-0" />
               {isLoading ? (

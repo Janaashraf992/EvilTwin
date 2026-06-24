@@ -2,167 +2,138 @@
 
 ## Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
-- [Git](https://git-scm.com/) installed
-- Ports `2222`, `2121`, `8081`, `1445`, `11433`, `8000`, `3000`, `5432`, `6633`, `8080` free on your machine
+- Docker Desktop installed and running
+- Git installed
+- Ports 22, 2222, 3000, 5432, 6633, 8000, 8080, 8081, 8082, 8088, 8089, 8888, 18000, 18088 free
 
----
-
-## 1. Clone the Repository
+## 1. Clone and Setup
 
 ```bash
 git clone https://github.com/Janaashraf992/EvilTwin.git
 cd EvilTwin
-```
-
----
-
-## 2. Create the Environment File
-
-Copy the example env file and open it:
-
-```bash
 cp .env.example .env
 ```
 
-Set the three **required** secrets inside `.env`:
-
+Set required secrets in `.env`:
 ```env
 POSTGRES_PASSWORD=changeme
 SECRET_KEY=change-me-in-production
 CANARY_WEBHOOK_SECRET=change-me-in-production
 ```
 
-> To generate strong secrets you can run:
-> ```bash
-> openssl rand -hex 32
-> ```
+Generate strong secrets:
+```bash
+openssl rand -hex 32
+```
 
----
-
-## 3. Start the Stack
+## 2. Start the Stack
 
 ```bash
 docker compose up --build -d
 ```
 
-This will build and start all services:
-- PostgreSQL database
-- Cowrie SSH honeypot
-- Dionaea multi-protocol honeypot
-- FastAPI backend
-- React frontend dashboard
-- Ryu SDN controller
+Wait ~30-40 seconds for everything to start.
 
-Check that all containers are running:
+## 3. Verify
 
 ```bash
-docker compose ps
+curl http://localhost:8000/health
+# {"status":"healthy","database":true,"model":true}
 ```
 
----
-
-## 4. Verify the Backend is Healthy
-
-```bash
-curl -s http://localhost:8000/health
-```
-
-Wait until it returns a healthy response (may take ~30–40 seconds on first start).
-
----
-
-## 5. Open the Dashboard
-
-Navigate to:
+## 4. Open Dashboard
 
 ```
 http://localhost:3000
 ```
 
-Log in with the seeded demo account:
-
-| Field    | Value                   |
-| -------- | ----------------------- |
-| Email    | `analyst@eviltwin.local` |
-| Password | `eviltwin-demo`          |
-
----
+Login:
+| Field | Value |
+|-------|-------|
+| Email | analyst@eviltwin.local |
+| Password | eviltwin-demo |
 
 ## Services & Ports
 
-| Service        | URL / Port          | Purpose                          |
-| -------------- | ------------------- | -------------------------------- |
-| Frontend       | http://localhost:3000 | SOC dashboard                  |
-| Backend API    | http://localhost:8000 | FastAPI REST + WebSocket API   |
-| API Docs       | http://localhost:8000/docs | Swagger UI                |
-| PostgreSQL     | `localhost:5432`    | Database                         |
-| Cowrie (SSH)   | `localhost:2222`    | SSH honeypot                     |
-| Dionaea FTP    | `localhost:2121`    | FTP honeypot                     |
-| Dionaea HTTP   | `localhost:8081`    | HTTP honeypot                    |
-| Dionaea SMB    | `localhost:1445`    | SMB honeypot                     |
-| Dionaea MSSQL  | `localhost:11433`   | MSSQL honeypot                   |
-| Ryu REST       | http://localhost:8080 | SDN controller REST API        |
+| Service | Port | Purpose |
+|---------|------|---------|
+| Frontend | 3000 | SOC Dashboard |
+| Backend API | 8000 | FastAPI REST + WebSocket |
+| API Docs | 8000/docs | Swagger UI |
+| PostgreSQL | 5432 | Database |
+| SSH Gateway | 22 | Pre-session scoring + routing |
+| Cowrie SSH | 2222 | SSH honeypot (direct) |
+| HTTP Gateway | 8888 | Per-IP HTTP routing |
+| Dionaea FTP | 2121 | FTP honeypot |
+| Dionaea HTTP | 8081 | HTTP honeypot (direct) |
+| Dionaea SMB | 1445 | SMB honeypot |
+| Dionaea MSSQL | 11433 | MSSQL honeypot |
+| Tripwire | 8082 | Canary bait server |
+| Dummy Real SSH | 8022 | Real server SSH banner |
+| Dummy Real HTTP | 8088 | Real server web page |
+| Ryu SDN | 8080 | SDN controller REST |
+| Splunk Ent | 18000 | Splunk Enterprise |
+| Splunk HEC | 8089 | HEC event collector |
 
----
+## Architecture
 
-## Stopping the Stack
+```
+Attacker → SSH Gateway (22)  → scoring → Cowrie (honeypot) or dummy-real (real)
+Attacker → HTTP Gateway (8888) → routing → Dionaea HTTP or dummy-real
+Attacker → FTP (2121) → Dionaea (always honeypot)
+Attacker → SMB (1445) → Dionaea (always honeypot)
+Attacker → MSSQL (11433) → Dionaea (always honeypot)
+Attacker → HTTP (8082) → Tripwire (benign web bug + leaked /.git secret)
+```
+
+## Canary Token Levels (graduated deception)
+
+Bait is no longer dumped in one open directory. Each canary token is a "level"
+whose real access difficulty matches its declared threat difficulty. Reaching
+any of them fires an alert (weighted by difficulty) to the dashboard.
+
+| Lvl | Difficulty | Surface (port) | Bait | How to reach it |
+|-----|-----------|----------------|------|-----------------|
+| 0 | 0 Benign | Tripwire HTTP (8082) | benign tracking pixel | just open `http://host:8082/` |
+| 1 | 1 Easy | Dionaea HTTP (8081) | `passwords.txt` | `GET /passwords.txt` on the web honeypot |
+| 2 | 2 Moderate | Dionaea FTP (2121) | `aws_credentials` | anonymous FTP, `RETR aws_credentials` |
+| 3 | 3 High | Tripwire HTTP (8082) | `.env.production` | discover the exposed `/.git/`, then fetch `/.env.production` |
+| 4 | 3 High | Cowrie SSH (2222) | `database_backup.sql` | log in, `cat /tmp/database_backup.sql` |
+| 5 | 4 Critical | Cowrie SSH (2222) | `id_rsa` | root session, `cat /root/.ssh/id_rsa` |
+
+- Levels 0 and 3 fire via the tripwire's HMAC webhook (`TRIPWIRE_TOKEN_MAP`).
+- Levels 1, 2, 4, 5 fire from backend honeypot-log detection
+  (`backend/services/canary.py`, override via `CANARY_BAIT_MAP`).
+- The tripwire directory listing is disabled — only the benign index page is
+  openly browsable; the `/.git/` and `/.env.production` paths must be discovered.
+
+## SSH Credentials (for testing real path)
+
+| Username | Password | Result |
+|----------|----------|--------|
+| real | eviltwin | Real server (Ubuntu banner) |
+| root/admin/test | anything | Cowrie honeypot |
+
+## Stopping
 
 ```bash
-docker compose down
+docker compose down          # Stop containers
+docker compose down -v       # Also remove volumes (database)
 ```
 
-To also remove all stored data (database volumes):
+## Testing from LAN
 
-```bash
-docker compose down -v
-```
-
----
-
-## Optional: Run Frontend in Dev Mode (without Docker)
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-The dev server starts at `http://localhost:5173`.
-
-Make sure the backend is running (via Docker) and set in `frontend/.env`:
-
-```env
-VITE_API_BASE_URL=http://localhost:8000
-VITE_WS_URL=ws://localhost:8000/ws/alerts
-```
-
----
-
-## Optional: Run Backend Locally (without Docker)
-
-Requires Python 3.11+ and a running PostgreSQL instance.
-
-```bash
-cd backend
-pip install -r requirements.txt
-```
-
-Create a `.env` file in `backend/` with your database credentials, then:
-
-```bash
-alembic upgrade head
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
----
+1. Find your LAN IP: `ipconfig` (Windows) / `ip a` (Linux)
+2. Ensure Windows Firewall allows the ports (see `.env` comments)
+3. Friends connect to `192.168.x.x` with ports above
+4. All traffic is scored, routed, and logged to the dashboard
 
 ## Troubleshooting
 
 | Problem | Fix |
-| ------- | --- |
-| Port already in use | Stop the conflicting process or change the port in `.env` |
-| Backend not healthy after 2 min | Run `docker compose logs backend` to see errors |
-| Database connection refused | Make sure `POSTGRES_PASSWORD` in `.env` is set |
-| Frontend blank page | Check browser console; ensure backend is reachable on port 8000 |
-| `POSTGRES_PASSWORD is required` error | You forgot to copy `.env.example` to `.env` |
+|---------|-----|
+| Port in use | Stop conflicting process or change port in `.env` |
+| Backend unhealthy | `docker compose logs backend` |
+| Database error | Ensure `POSTGRES_PASSWORD` set in `.env` |
+| Frontend blank | Check browser console; backend on port 8000 |
+| Canary not firing | Restart tripwire: `docker compose restart tripwire` |

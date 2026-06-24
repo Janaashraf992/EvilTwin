@@ -33,6 +33,29 @@ SUSPICIOUS_USERNAMES = {
 }
 
 
+class _RelayClientSession(asyncssh.SSHClientSession):
+    def __init__(self, server_chan: asyncssh.SSHServerChannel):
+        self._server_chan = server_chan
+
+    def data_received(self, data, datatype) -> None:
+        if self._server_chan is None or self._server_chan.is_closing():
+            return
+        try:
+            if datatype == asyncssh.EXTENDED_DATA_STDERR:
+                self._server_chan.write_stderr(data)
+            else:
+                self._server_chan.write(data)
+        except Exception:
+            pass
+
+    def connection_lost(self, exc: Optional[Exception]) -> None:
+        if self._server_chan is not None and not self._server_chan.is_closing():
+            try:
+                self._server_chan.write_eof()
+            except Exception:
+                pass
+
+
 class GatewaySession(asyncssh.SSHServerSession):
     def __init__(self, signals: SessionSignals, server: "GatewayServer"):
         self._signals = signals
@@ -40,9 +63,30 @@ class GatewaySession(asyncssh.SSHServerSession):
         self._chan: Optional[asyncssh.SSHServerChannel] = None
         self._ssh_conn: Optional[asyncssh.SSHClientConnection] = None
         self._proxy_lock = asyncio.Lock()
+        self._upstream_chan: Optional[asyncssh.SSHClientChannel] = None
+        self._pre_buffer: list = []
+        self._term_type: str = "xterm-256color"
+        self._term_size: tuple[int, int, int, int] = (80, 24, 0, 0)
 
     def connection_made(self, chan: asyncssh.SSHServerChannel) -> None:
         self._chan = chan
+
+    def data_received(self, data, datatype) -> None:
+        if self._upstream_chan is not None:
+            try:
+                self._upstream_chan.write(data)
+            except Exception:
+                pass
+        else:
+            self._pre_buffer.append(data)
+
+    def eof_received(self) -> bool:
+        if self._upstream_chan is not None:
+            try:
+                self._upstream_chan.write_eof()
+            except Exception:
+                pass
+        return False
 
     def pty_requested(
         self,
@@ -50,6 +94,8 @@ class GatewaySession(asyncssh.SSHServerSession):
         term_size: tuple[int, int, int, int],
         term_modes: dict[int, int],
     ) -> bool:
+        self._term_type = term_type or "xterm-256color"
+        self._term_size = term_size
         return True
 
     def shell_requested(self) -> bool:
@@ -64,32 +110,49 @@ class GatewaySession(asyncssh.SSHServerSession):
         return False
 
     def session_started(self) -> None:
+        if self._chan is not None:
+            try:
+                self._chan.set_line_mode(False)
+                self._chan.set_echo(False)
+            except Exception:
+                pass
         asyncio.get_running_loop().create_task(self._run_session())
 
     async def _run_session(self) -> None:
-        if self._server._score_task and not self._server._score_task.done():
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(self._server._score_task),
-                    timeout=30.0,
-                )
-            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-                pass
+        username = self._signals.last_username or ""
+        password = self._signals.last_password or ""
 
-        decision = self._signals.decision
-        if decision is None:
-            decision = "honeypot"
-
-        logger.info(
-            "Session started for %s — routing to %s",
-            self._signals.src_ip,
-            decision,
-        )
-
-        if decision == "real":
+        # Fast-path: correct credentials → route to real immediately
+        if username == REAL_SSH_USER and password == REAL_SSH_PASSWORD:
+            self._signals.set_decision("real")
+            self._signals.mark_fast_routed()
+            logger.info(
+                "Session for %s — credential match (%s) → real (fast path)",
+                self._signals.src_ip, username,
+            )
+            asyncio.get_running_loop().create_task(
+                self._server._notify_sdn(self._signals.src_ip, "real")
+            )
+            asyncio.get_running_loop().create_task(
+                self._server._notify_routing(self._signals.src_ip, "real")
+            )
             await self._proxy_to_real()
-        else:
-            await self._proxy_to_honeypot()
+            return
+
+        # Wrong credentials → honeypot immediately (backend score still runs async)
+        self._signals.set_decision("honeypot")
+        self._signals.mark_fast_routed()
+        logger.info(
+            "Session for %s — wrong creds (%s) → honeypot (fast path)",
+            self._signals.src_ip, username,
+        )
+        asyncio.get_running_loop().create_task(
+            self._server._notify_sdn(self._signals.src_ip, "honeypot")
+        )
+        asyncio.get_running_loop().create_task(
+            self._server._notify_routing(self._signals.src_ip, "honeypot")
+        )
+        await self._proxy_to_honeypot()
 
     async def _proxy_to_real(self) -> None:
         username = REAL_SSH_USER or self._signals.last_username
@@ -148,7 +211,10 @@ class GatewaySession(asyncssh.SSHServerSession):
                 )
                 self._ssh_conn = conn
             except Exception as exc:
-                logger.error("Honeypot %s:%s unreachable: %s", HONEYPOT_HOST, HONEYPOT_PORT, exc)
+                logger.error(
+                    "Honeypot %s:%s unreachable: %s",
+                    HONEYPOT_HOST, HONEYPOT_PORT, exc,
+                )
                 if self._chan:
                     self._chan.write(b"Connection failed.\r\n")
                     self._chan.write_eof()
@@ -177,43 +243,34 @@ class GatewaySession(asyncssh.SSHServerSession):
     ) -> None:
         if not self._chan:
             return
-        chan, _ = await conn.create_session(term_type="xterm-256color")
-        await self._bidirectional_copy(chan)
 
-    async def _bidirectional_copy(
-        self, remote_chan: asyncssh.SSHChannel
-    ) -> None:
-        assert self._chan is not None
+        server_chan = self._chan
 
-        async def client_to_remote() -> None:
-            try:
-                while True:
-                    data = await self._chan.read(4096)
-                    if not data:
-                        break
-                    remote_chan.write(data)
-            except Exception:
-                pass
-            finally:
-                remote_chan.write_eof()
-
-        async def remote_to_client() -> None:
-            try:
-                while True:
-                    data = await remote_chan.read(4096)
-                    if not data:
-                        break
-                    self._chan.write(data)
-            except Exception:
-                pass
-            finally:
-                if self._chan:
-                    self._chan.write_eof()
-
-        await asyncio.gather(
-            asyncio.create_task(client_to_remote()),
-            asyncio.create_task(remote_to_client()),
+        chan, _session = await conn.create_session(
+            lambda: _RelayClientSession(server_chan),
+            term_type=self._term_type,
+            term_size=self._term_size,
         )
+        self._upstream_chan = chan
+
+        for buffered in self._pre_buffer:
+            try:
+                chan.write(buffered)
+            except Exception:
+                pass
+        self._pre_buffer.clear()
+
+        try:
+            await chan.wait_closed()
+        finally:
+            if self._chan and not self._chan.is_closing():
+                try:
+                    self._chan.exit(0)
+                except Exception:
+                    try:
+                        self._chan.close()
+                    except Exception:
+                        pass
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
         if self._ssh_conn:
@@ -283,7 +340,7 @@ class GatewayServer(asyncssh.SSHServer):
                 self._request_score()
             )
 
-        return True
+        return False
 
     def kbdint_auth_requested(self, username: str) -> bool:
         return True
@@ -349,13 +406,59 @@ class GatewayServer(asyncssh.SSHServer):
         llm_used = result.get("llm_used", False)
         llm_explanation = result.get("llm_explanation", "")
 
-        log_parts = [f"Decision for {self._signals.src_ip} → {decision} (confidence={confidence:.2f} reason={reason})"]
+        log_parts = [
+            f"Decision for {self._signals.src_ip} → {decision} "
+            f"(confidence={confidence:.2f} reason={reason})"
+        ]
         if user_type:
             log_parts.append(f"user_type={user_type}")
         if llm_used and llm_explanation:
             log_parts.append(f"LLM: {llm_explanation}")
         logger.info(" | ".join(log_parts))
-        self._signals.set_decision(decision)
+
+        # Don't override a fast-path decision (credential match already routed to real)
+        if not self._signals.fast_routed:
+            self._signals.set_decision(decision)
+
+            # Notify SDN controller (fire-and-forget)
+            if decision in ("real", "honeypot"):
+                asyncio.get_running_loop().create_task(
+                    self._notify_sdn(self._signals.src_ip, decision)
+                )
+                asyncio.get_running_loop().create_task(
+                    self._notify_routing(self._signals.src_ip, decision)
+                )
+
+    async def _notify_sdn(self, src_ip: str, decision: str) -> None:
+        sdn_url = os.getenv("SDN_REST_URL", "http://ryu:8080")
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                await session.post(
+                    f"{sdn_url}/sdns/flows",
+                    json={"ip": src_ip, "target": decision, "duration": 300},
+                    timeout=aiohttp.ClientTimeout(total=3),
+                )
+            logger.debug("SDN notified: %s → %s", src_ip, decision)
+        except Exception:
+            pass
+
+    async def _notify_routing(self, src_ip: str, decision: str) -> None:
+        backend_url = os.getenv("BACKEND_URL", "http://backend:8000")
+        routing_key = os.getenv("ROUTING_API_KEY", "").strip()
+        try:
+            import aiohttp
+            headers = {"X-Routing-Key": routing_key} if routing_key else {}
+            async with aiohttp.ClientSession() as session:
+                await session.post(
+                    f"{backend_url}/routing/decision",
+                    json={"ip": src_ip, "target": decision, "duration": 300},
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=3),
+                )
+            logger.debug("Routing table updated: %s → %s", src_ip, decision)
+        except Exception:
+            pass
 
     async def _score_call(self, attempt: int, timeout: float = BACKEND_TIMEOUT) -> dict:
         assert self._signals is not None
@@ -366,8 +469,9 @@ class GatewayServer(asyncssh.SSHServer):
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{BACKEND_URL}/score/initial?attempt={attempt}",
+                    f"{BACKEND_URL}/score/initial",
                     json=payload,
+                    headers={"X-Gateway-Attempt": str(attempt)},
                     timeout=aiohttp.ClientTimeout(total=timeout),
                 ) as resp:
                     if resp.status == 200:

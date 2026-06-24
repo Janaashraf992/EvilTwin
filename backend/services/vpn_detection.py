@@ -149,7 +149,7 @@ class VPNDetector:
         return result
 
     async def _query_ip_api(self, ip: str, result: VPNResult) -> VPNResult:
-        resp = await self.client.get(f"http://ip-api.com/json/{ip}?fields=status,country,city,isp,proxy,hosting,lat,lon")
+        resp = await self.client.get(f"https://ip-api.com/json/{ip}?fields=status,country,city,isp,proxy,hosting,lat,lon")
         if resp.status_code != 200:
             return result
         data = resp.json()
@@ -174,14 +174,21 @@ class VPNDetector:
             return self.cache[ip]
 
         async with self.semaphore:
+            result = VPNResult()
             try:
                 result = await self._query_ipinfo(ip)
+            except Exception:
+                pass
+            try:
                 if result.confidence < 90:
                     result = await self._query_abuseipdb(ip, result)
+            except Exception:
+                pass
+            try:
                 if result.confidence < 60:
                     result = await self._query_ip_api(ip, result)
             except Exception:
-                result = VPNResult()
+                pass
 
         self.cache[ip] = result
         return result

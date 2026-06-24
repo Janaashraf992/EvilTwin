@@ -13,17 +13,28 @@ class FlowManager:
     def __init__(self, logger) -> None:
         self.logger = logger
 
-    def install_redirect_flow(self, datapath, src_ip: str, honeypot_ip: str, out_port: int) -> None:
+    def install_redirect_flow(
+        self, datapath, src_ip: str, target_ip: str, out_port: int
+    ) -> None:
+        """Install OpenFlow rule: redirect ALL traffic from src_ip to target_ip.
+
+        Rewrites ipv4_dst for every packet from src_ip.
+        Return traffic flows normally (L2 learning on OVS handles it).
+        """
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
-        match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP, ipv4_src=src_ip)
+        match = parser.OFPMatch(
+            eth_type=ether_types.ETH_TYPE_IP,
+            ipv4_src=src_ip,
+        )
         actions = [
-            parser.OFPActionSetField(ipv4_dst=honeypot_ip),
+            parser.OFPActionSetField(ipv4_dst=target_ip),
             parser.OFPActionOutput(out_port),
         ]
-        instructions = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
-
+        instructions = [
+            parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)
+        ]
         mod = parser.OFPFlowMod(
             datapath=datapath,
             priority=200,
@@ -33,7 +44,10 @@ class FlowManager:
             flags=ofproto.OFPFF_SEND_FLOW_REM,
         )
         datapath.send_msg(mod)
-        self.logger.info("Installed redirect flow src=%s -> honeypot=%s", src_ip, honeypot_ip)
+        self.logger.info(
+            "Redirect flow: src=%s → dst-rewrite→%s port=%d",
+            src_ip, target_ip, out_port,
+        )
 
     def remove_flow(self, datapath, src_ip: str) -> None:
         ofproto = datapath.ofproto

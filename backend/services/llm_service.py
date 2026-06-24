@@ -114,13 +114,13 @@ class LLMService:
         try:
             return json.loads(content.strip())
         except json.JSONDecodeError:
-            # Fallback: extract first flat JSON object
-            match = re.search(r"\{.*\}", content, re.DOTALL)
-            if match:
-                try:
-                    return json.loads(match.group(0))
-                except json.JSONDecodeError:
-                    pass
+            # Fallback: use raw_decode to find first valid JSON object
+            try:
+                decoder = json.JSONDecoder()
+                obj, _ = decoder.raw_decode(content.strip())
+                return obj
+            except json.JSONDecodeError:
+                pass
         return {"decision": "honeypot", "user_type": "unknown", "confidence": 0.50, "explanation": "LLM parsing failed"}
 
     async def analyze_session(

@@ -18,9 +18,12 @@ export function useWebSocket(url: string) {
 
     const connect = () => {
       const token = useAuthStore.getState().accessToken;
-      const wsUrl = token ? `${url}?token=${encodeURIComponent(token)}` : url;
-      ws = new WebSocket(wsUrl);
+      ws = new WebSocket(url);
       ws.onopen = () => {
+        // Send JWT as first message after connection (not in URL)
+        if (token && ws?.readyState === WebSocket.OPEN) {
+          ws.send(token);
+        }
         setConnected(true);
         setRetryCount(0);
         setNextRetryInMs(null);

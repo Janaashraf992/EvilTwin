@@ -47,7 +47,7 @@ export function SessionDetail({ session }: { session: SessionLog | null }) {
           </div>
           <div>
             <span className="text-text-muted uppercase text-xs tracking-wider">Threat Score</span>
-            <p className="text-threat mt-0.5 font-mono text-sm">{session.threat_score.toFixed(2)} / 100</p>
+            <p className="text-threat mt-0.5 font-mono text-sm">{(session.threat_score * 100).toFixed(0)}%</p>
           </div>
         </div>
 

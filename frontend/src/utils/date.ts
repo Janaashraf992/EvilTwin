@@ -32,7 +32,10 @@ function parseAsCairo(input: string | Date): Date {
   if (input.endsWith("Z") || TZ_OFFSET_RE.test(input)) {
     return new Date(input);
   }
-  return new Date(input + "+02:00");
+  // Offset-less value: treat as an instant and let Intl render it in
+  // Africa/Cairo (DST-aware). The API now always sends an explicit offset,
+  // so this is only a defensive fallback.
+  return new Date(input);
 }
 
 export function formatTime(input: string | Date): string {

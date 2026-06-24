@@ -31,6 +31,6 @@ class DummyProfile:
 
 def test_extract_features_shape():
     vec = extract_features(DummySession(), DummyProfile(), multi_protocol=True, known_bad_ip=True)
-    assert len(vec) == len(FEATURES) == 16
+    assert len(vec) == len(FEATURES) == 21
     assert vec[2] == 1.0
     assert vec[4] == 1.0

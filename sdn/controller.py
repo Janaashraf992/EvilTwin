@@ -2,11 +2,8 @@ from __future__ import annotations
 
 # pyright: reportMissingImports=false
 
-import json
 import os
 import time
-import urllib.error
-import urllib.request
 from typing import Any
 
 try:
@@ -92,32 +89,89 @@ class FlowController(wsgi.ControllerBase):
         super().__init__(req, link, data, **config)
         self.app = data["eviltwin_app"]
 
-    @wsgi.route("flows", "/flows", methods=["GET"])
-    def list_flows(self, req, **kwargs):
-        body = {
-            ip: {"expires_at": expiry}
-            for ip, expiry in self.app.suspicious_ips.items()
-            if expiry > time.time()
-        }
-        return wsgi.Response(content_type="application/json", body=json.dumps(body))
-
-    @wsgi.route("flows", "/flows", methods=["POST"])
-    def add_flow(self, req, **kwargs):
-        data = req.json if req.body else {}
+    @wsgi.route("sdns", "/sdns/flows", methods=["POST"])
+    def add_sdns_flow(self, req, **kwargs):
+        """Called by gateway after pre-session decision.
+        Body: {"ip": "10.0.1.10", "target": "real"|"honeypot", "duration": 300}
+        """
+        import json as _json
+        data = _json.loads(req.body) if req.body else {}
         ip = data.get("ip")
+        target = data.get("target")
         duration = int(data.get("duration", 300))
-        if not ip:
-            return wsgi.Response(status=400, body="missing ip")
-        self.app.suspicious_ips[ip] = time.time() + duration
-        return wsgi.Response(content_type="application/json", body=json.dumps({"status": "ok", "ip": ip}))
+        if not ip or not target:
+            return wsgi.Response(status=400, body="missing ip or target")
 
-    @wsgi.route("flows", "/flows/{ip}", methods=["DELETE"])
-    def del_flow(self, req, **kwargs):
+        # Resolve target to IP
+        if target == "honeypot":
+            target_ip = self.app.honeypot_ip
+        elif target == "real":
+            target_ip = self.app.real_server_ip
+        else:
+            target_ip = target  # raw IP string
+
+        # Store routing
+        self.app.routing_table[ip] = {
+            "target_ip": target_ip,
+            "target": target,
+            "expires_at": __import__("time").time() + duration,
+        }
+
+        # Install flows on all connected switches
+        for dpid, dp in list(self.app.datapaths.items()):
+            out_port = self.app._lookup_out_port(dpid, target_ip)
+            if out_port is not None:
+                self.app.flow_manager.install_redirect_flow(
+                    dp, ip, target_ip, out_port
+                )
+
+        return wsgi.Response(
+            content_type="application/json",
+            body=_json.dumps({
+                "status": "ok",
+                "ip": ip,
+                "target": target,
+                "target_ip": target_ip,
+            }),
+        )
+
+    @wsgi.route("sdns", "/sdns/routes/{ip}", methods=["GET"])
+    def get_sdns_route(self, req, **kwargs):
+        """Check routing for an IP."""
+        import json as _json
         ip = kwargs["ip"]
-        self.app.suspicious_ips.pop(ip, None)
+        route = self.app.routing_table.get(ip)
+        if route:
+            return wsgi.Response(
+                content_type="application/json",
+                body=_json.dumps(route),
+            )
+        return wsgi.Response(
+            status=404,
+            content_type="application/json",
+            body=_json.dumps({"ip": ip, "routed": False}),
+        )
+
+    @wsgi.route("sdns", "/sdns/flows", methods=["GET"])
+    def list_sdns_flows(self, req, **kwargs):
+        import json as _json
+        body = {
+            ip: {"target": v["target"], "target_ip": v["target_ip"]}
+            for ip, v in self.app.routing_table.items()
+        }
+        return wsgi.Response(content_type="application/json", body=_json.dumps(body))
+
+    @wsgi.route("sdns", "/sdns/flows/{ip}", methods=["DELETE"])
+    def del_sdns_flow(self, req, **kwargs):
+        import json as _json
+        ip = kwargs["ip"]
+        self.app.routing_table.pop(ip, None)
         for dp in self.app.datapaths.values():
             self.app.flow_manager.remove_flow(dp, ip)
-        return wsgi.Response(content_type="application/json", body=json.dumps({"status": "removed", "ip": ip}))
+        return wsgi.Response(
+            content_type="application/json",
+            body=_json.dumps({"status": "removed", "ip": ip}),
+        )
 
 
 class EvilTwinController(app_manager.RyuApp):
@@ -127,11 +181,12 @@ class EvilTwinController(app_manager.RyuApp):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.mac_to_port: dict[int, dict[str, int]] = {}
-        self.suspicious_ips: dict[str, float] = {}
+        self.routing_table: dict[str, dict] = {}
         self.datapaths: dict[int, Any] = {}
 
         self.backend_url = os.getenv("BACKEND_URL", "http://backend:8000")
         self.honeypot_ip = os.getenv("HONEYPOT_IP", "10.0.2.10")
+        self.real_server_ip = os.getenv("REAL_SERVER_IP", "10.0.1.100")
         self.threshold = int(os.getenv("THREAT_REDIRECT_THRESHOLD", "2"))
 
         self.flow_manager = FlowManager(self.logger)
@@ -139,16 +194,17 @@ class EvilTwinController(app_manager.RyuApp):
         wsgi_app = kwargs["wsgi"]
         wsgi_app.register(FlowController, {"eviltwin_app": self})
 
-    def query_threat_score(self, ip: str) -> dict[str, Any]:
-        try:
-            req = urllib.request.Request(f"{self.backend_url}/score/{ip}", method="GET")
-            with urllib.request.urlopen(req, timeout=2) as response:
-                if response.status != 200:
-                    return {"threat_level": 0}
-                payload = response.read().decode("utf-8")
-                return json.loads(payload)
-        except Exception:
-            return {"threat_level": 0}
+    def _lookup_out_port(self, dpid: int, target_ip: str) -> int | None:
+        """Find the switch port connected to target_ip.
+        Uses learned MAC-to-port mapping from packet_in_handler.
+        Falls back to OFPP_FLOOD if port unknown (OVS will learn it).
+        """
+        ports = self.mac_to_port.get(dpid, {})
+        # Any known port is better than nothing — OVS learning handles the rest
+        for _mac, port in ports.items():
+            if port != 0:
+                return port
+        return None  # caller should fall back to FLOOD
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -168,23 +224,28 @@ class EvilTwinController(app_manager.RyuApp):
         if eth is None:
             return
 
+        # Learn MAC-to-port mapping
         self.mac_to_port.setdefault(dpid, {})
         self.mac_to_port[dpid][eth.src] = in_port
-
         out_port = self.mac_to_port[dpid].get(eth.dst, ofproto.OFPP_FLOOD)
 
+        # Check routing table for this source IP
         ip_pkt = pkt.get_protocol(ipv4.ipv4)
         if ip_pkt:
             src_ip = ip_pkt.src
             now = time.time()
-            expiry = self.suspicious_ips.get(src_ip, 0)
-            if expiry < now:
-                self.suspicious_ips.pop(src_ip, None)
-                level = self.query_threat_score(src_ip).get("threat_level", 0)
-                if level >= self.threshold:
-                    self.suspicious_ips[src_ip] = now + 300
-                    self.flow_manager.install_redirect_flow(datapath, src_ip, self.honeypot_ip, out_port)
+            route = self.routing_table.get(src_ip)
+            if route:
+                if route["expires_at"] < now:
+                    self.routing_table.pop(src_ip, None)
+                else:
+                    target_port = self._lookup_out_port(dpid, route["target_ip"])
+                    if target_port is not None:
+                        self.flow_manager.install_redirect_flow(
+                            datapath, src_ip, route["target_ip"], target_port
+                        )
 
+        # Normal forwarding
         actions = [parser.OFPActionOutput(out_port)]
         out = parser.OFPPacketOut(
             datapath=datapath,

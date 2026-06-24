@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
-import DeckGL from "@deck.gl/react";
+import { DeckGL } from "@deck.gl/react";
 import { GeoJsonLayer, ArcLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { motion } from "framer-motion";
 import type { SessionLog } from "../../types";
@@ -14,8 +14,6 @@ const COUNTRY_COORDS: Record<string, [number, number]> = {
   AU: [134, -25], CA: [-106, 56], TR: [35, 39], IR: [53, 32], PK: [69, 30],
   ZA: [22, -30], EG: [30, 26], NG: [8, 10], CO: [-74, 4], MX: [-102, 23]
 };
-
-const OCEAN_COLOR: [number, number, number, number] = [16, 32, 64, 255];
 
 const CONTINENT_FILLS: Record<string, [number, number, number, number]> = {
   "North America": [107, 142, 75, 255],
@@ -77,7 +75,8 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
           }
         }
         setGeoData(fc);
-      });
+      })
+      .catch(() => { /* CDN unreachable — map renders without geography */ });
   }, []);
 
   useEffect(() => {
@@ -232,7 +231,7 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
         </span>
       </div>
 
-      <div className="flex-1 relative rounded-lg border border-border/30 overflow-hidden shadow-[inset_0_0_40px_rgba(0,0,0,0.4)]" style={{ backgroundColor: `rgb(${OCEAN_COLOR[0]}, ${OCEAN_COLOR[1]}, ${OCEAN_COLOR[2]})` }}>
+      <div className="flex-1 relative rounded-lg border border-border/30 overflow-hidden shadow-[inset_0_0_40px_rgba(0,0,0,0.4)]" style={{ backgroundColor: "var(--color-map-ocean)" }}>
         <div className="absolute inset-0">
           <DeckGL
             initialViewState={INITIAL_VIEW_STATE}
@@ -245,9 +244,9 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
               if (name && !object.ip) {
                 return {
                   html: `
-                    <div style="font-family: monospace; background: rgba(10, 14, 26, 0.95); border: 1px solid rgba(255,255,255,0.1); padding: 10px 14px; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.8); backdrop-filter: blur(10px);">
-                      <div style="color: #e2e8f0; font-size: 12px; font-weight: bold;">${name}</div>
-                      <div style="color: #64748b; font-size: 10px; margin-top: 2px;">${props.CONTINENT || ""}</div>
+                    <div style="font-family: monospace; background: var(--color-map-tooltip-bg); border: 1px solid var(--color-map-tooltip-border); padding: 10px 14px; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.8); backdrop-filter: blur(10px);">
+                      <div style="color: var(--color-map-tooltip-heading); font-size: 12px; font-weight: bold;">${name}</div>
+                      <div style="color: var(--color-map-tooltip-dim); font-size: 10px; margin-top: 2px;">${props.CONTINENT || ""}</div>
                     </div>
                   `,
                   style: {
@@ -259,22 +258,22 @@ export function GeoAttackMap({ sessions }: { sessions: SessionLog[] }) {
               }
               return {
                 html: `
-                  <div style="font-family: monospace; background: rgba(10, 14, 26, 0.95); border: 1px solid rgba(230, 57, 70, 0.3); padding: 12px; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.8); backdrop-filter: blur(10px); min-width: 200px;">
-                    <div style="color: #64748b; font-size: 10px; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 1px;">Ingress Telemetry</div>
+                  <div style="font-family: monospace; background: var(--color-map-tooltip-bg); border: 1px solid rgba(230, 57, 70, 0.3); padding: 12px; border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.8); backdrop-filter: blur(10px); min-width: 200px;">
+                    <div style="color: var(--color-map-tooltip-dim); font-size: 10px; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 1px;">Ingress Telemetry</div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                      <span style="color: #94a3b8; font-size: 12px;">Origin IP</span>
-                      <span style="color: #f8fafc; font-weight: bold; font-size: 12px;">${object.ip}</span>
+                      <span style="color: var(--color-map-tooltip-muted); font-size: 12px;">Origin IP</span>
+                      <span style="color: var(--color-map-tooltip-text); font-weight: bold; font-size: 12px;">${object.ip}</span>
                     </div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                      <span style="color: #94a3b8; font-size: 12px;">Location</span>
-                      <span style="color: #f8fafc; font-size: 12px;">${object.country} [${object.source[1].toFixed(2)}, ${object.source[0].toFixed(2)}]</span>
+                      <span style="color: var(--color-map-tooltip-muted); font-size: 12px;">Location</span>
+                      <span style="color: var(--color-map-tooltip-text); font-size: 12px;">${object.country} [${object.source[1].toFixed(2)}, ${object.source[0].toFixed(2)}]</span>
                     </div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                      <span style="color: #94a3b8; font-size: 12px;">Protocol</span>
+                      <span style="color: var(--color-map-tooltip-muted); font-size: 12px;">Protocol</span>
                       <span style="color: rgba(46, 196, 182, 1); font-weight: bold; text-transform: uppercase; font-size: 12px;">${object.protocol}</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1);">
-                      <span style="color: #94a3b8; font-size: 12px;">Threat Score</span>
+                    <div style="display: flex; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--color-map-tooltip-border);">
+                      <span style="color: var(--color-map-tooltip-muted); font-size: 12px;">Threat Score</span>
                       <span style="color: ${object.threat >= 3 ? "rgba(230, 57, 70, 1)" : "rgba(233, 196, 106, 1)"}; font-weight: bold; font-size: 12px;">
                         ${(object.score * 100).toFixed(1)}% (Lvl ${object.threat})
                       </span>

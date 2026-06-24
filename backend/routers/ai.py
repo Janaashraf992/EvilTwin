@@ -47,11 +47,14 @@ async def analyze_session(
         raise HTTPException(status_code=404, detail="Session not found")
 
     session, profile = row
-    result = await app_state.llm_service.analyze_session(
-        session=session,
-        profile=profile,
-        additional_context=body.context or "",
-    )
+    try:
+        result = await app_state.llm_service.analyze_session(
+            session=session,
+            profile=profile,
+            additional_context=body.context or "",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"LLM service unavailable: {exc}")
 
     return ThreatAnalysisResponse(
         session_id=body.session_id,
@@ -93,11 +96,14 @@ async def chat_threat_intel(
                 f"Commands: {'; '.join(cmds)}"
             )
 
-    result = await app_state.llm_service.chat(
-        message=body.message,
-        conversation_history=body.conversation_history,
-        session_context=session_context,
-    )
+    try:
+        result = await app_state.llm_service.chat(
+            message=body.message,
+            conversation_history=body.conversation_history,
+            session_context=session_context,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"LLM service unavailable: {exc}")
 
     return ChatResponse(
         reply=result["reply"],

@@ -25,7 +25,11 @@ class ThreatScorer:
     def _load_pipeline(self) -> Any:
         if os.path.exists(self.model_path):
             logger.info("Loading ML model from %s", self.model_path)
-            return joblib.load(self.model_path)
+            try:
+                return joblib.load(self.model_path)
+            except Exception as exc:
+                logger.warning("Failed to load model from %s: %s", self.model_path, exc)
+                return None
         logger.warning("Model file not found at %s – all threat scores will be 0", self.model_path)
         return None
 

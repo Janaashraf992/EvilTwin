@@ -9,6 +9,7 @@ from sqlalchemy import and_, cast, func, select
 from sqlalchemy.dialects.postgresql import INET as PG_INET
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import REAL_HONEYPOT_TYPES
 from database import get_db
 from deps import get_current_user
 from models import AttackerProfile, SessionLog, User
@@ -29,7 +30,7 @@ async def list_sessions(
     db: AsyncSession = Depends(get_db),
     _current_user: User = Depends(get_current_user),
 ):
-    filters = []
+    filters = [SessionLog.honeypot.in_(REAL_HONEYPOT_TYPES)]
     if threat_level is not None:
         filters.append(AttackerProfile.threat_level == threat_level)
     if honeypot:
@@ -39,6 +40,11 @@ async def list_sessions(
     if date_to:
         filters.append(SessionLog.start_time <= date_to)
     if ip:
+        import ipaddress
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid IP address: {ip}") from exc
         filters.append(SessionLog.attacker_ip == cast(ip, PG_INET))
 
     where_clause = and_(*filters) if filters else None
@@ -46,7 +52,7 @@ async def list_sessions(
     count_query = (
         select(func.count())
         .select_from(SessionLog)
-        .join(AttackerProfile, AttackerProfile.ip == SessionLog.attacker_ip)
+        .outerjoin(AttackerProfile, AttackerProfile.ip == SessionLog.attacker_ip)
     )
     if where_clause is not None:
         count_query = count_query.where(where_clause)
@@ -56,7 +62,7 @@ async def list_sessions(
 
     query = (
         select(SessionLog, AttackerProfile)
-        .join(AttackerProfile, AttackerProfile.ip == SessionLog.attacker_ip)
+        .outerjoin(AttackerProfile, AttackerProfile.ip == SessionLog.attacker_ip)
         .order_by(SessionLog.start_time.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -100,7 +106,7 @@ async def get_session(
 ) -> SessionResponse:
     query = (
         select(SessionLog, AttackerProfile)
-        .join(AttackerProfile, AttackerProfile.ip == SessionLog.attacker_ip)
+        .outerjoin(AttackerProfile, AttackerProfile.ip == SessionLog.attacker_ip)
         .where(SessionLog.id == session_id)
     )
     row = (await db.execute(query)).first()

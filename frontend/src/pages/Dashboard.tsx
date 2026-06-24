@@ -7,7 +7,7 @@ import { StatCard } from "../components/dashboard/StatCard";
 import { ThreatFeed } from "../components/dashboard/ThreatFeed";
 import { ThreatLevelGauge } from "../components/dashboard/ThreatLevelGauge";
 import { TopAttackerTable } from "../components/dashboard/TopAttackerTable";
-import { Activity, ShieldAlert, Users } from "lucide-react";
+import { Activity, Shield, ShieldAlert, Users } from "lucide-react";
 import type { SessionLog } from "../types";
 
 const container = {
@@ -37,9 +37,10 @@ export function Dashboard() {
       initial="hidden"
       animate="show"
     >
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <motion.div variants={item}><StatCard label="Sessions 24h" value={stats?.total_sessions_24h ?? 0} icon={<Activity size={20} />} /></motion.div>
         <motion.div variants={item}><StatCard label="Unique IPs" value={stats?.unique_attackers_24h ?? 0} icon={<Users size={20} />} /></motion.div>
+        <motion.div variants={item}><StatCard label="VPN Users" value={stats?.vpn_users_count ?? 0} icon={<Shield size={20} className="text-cyan-400" />} /></motion.div>
         <motion.div variants={item}><StatCard label="Critical Alerts" value={stats?.critical_alerts_24h ?? 0} icon={<ShieldAlert size={20} className="text-threat" />} /></motion.div>
       </div>
 

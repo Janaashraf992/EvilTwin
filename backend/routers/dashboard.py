@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import CAIRO_TZ, cairo_iso
+from config import CAIRO_TZ, REAL_HONEYPOT_TYPES, cairo_iso
 
 from database import get_db
 from deps import get_current_user
@@ -24,11 +24,21 @@ async def get_stats(
     since = datetime.now(CAIRO_TZ).replace(tzinfo=None) - timedelta(hours=24)
 
     total_sessions_24h = (
-        await db.execute(select(func.count(SessionLog.id)).where(SessionLog.start_time >= since))
+        await db.execute(
+            select(func.count(SessionLog.id)).where(
+                SessionLog.start_time >= since,
+                SessionLog.honeypot.in_(REAL_HONEYPOT_TYPES),
+            )
+        )
     ).scalar_one()
 
     unique_attackers_24h = (
-        await db.execute(select(func.count(func.distinct(SessionLog.attacker_ip))).where(SessionLog.start_time >= since))
+        await db.execute(
+            select(func.count(func.distinct(SessionLog.attacker_ip))).where(
+                SessionLog.start_time >= since,
+                SessionLog.honeypot.in_(REAL_HONEYPOT_TYPES),
+            )
+        )
     ).scalar_one()
 
     critical_alerts_24h = (
@@ -49,6 +59,7 @@ async def get_stats(
         await db.execute(
             select(func.count(func.distinct(SessionLog.attacker_ip))).where(
                 SessionLog.start_time >= since,
+                SessionLog.honeypot.in_(REAL_HONEYPOT_TYPES),
                 SessionLog.attacker_ip.in_(
                     select(AttackerProfile.ip).where(AttackerProfile.vpn_detected == True)
                 ),
@@ -59,14 +70,24 @@ async def get_stats(
     honeypot_rows = (
         await db.execute(
             select(SessionLog.honeypot, func.count(SessionLog.id).label("count"))
-            .where(SessionLog.start_time >= since)
+            .where(
+                SessionLog.start_time >= since,
+                SessionLog.honeypot.in_(REAL_HONEYPOT_TYPES),
+            )
             .group_by(SessionLog.honeypot)
         )
     ).all()
     honeypot_breakdown = [{"honeypot": row.honeypot, "count": row.count} for row in honeypot_rows]
 
     sessions = (
-        await db.execute(select(SessionLog).where(SessionLog.start_time >= since).order_by(SessionLog.start_time.desc()))
+        await db.execute(
+            select(SessionLog)
+            .where(
+                SessionLog.start_time >= since,
+                SessionLog.honeypot.in_(REAL_HONEYPOT_TYPES),
+            )
+            .order_by(SessionLog.start_time.desc())
+        )
     ).scalars().all()
 
     top_counter: dict[str, int] = {}
@@ -87,7 +108,11 @@ async def get_stats(
     attacks_by_hour_list = [{"hour": hour, "count": count} for hour, count in sorted(attacks_by_hour.items())]
 
     level_rows = (
-        await db.execute(select(Alert.threat_level, func.count(Alert.id)).group_by(Alert.threat_level))
+        await db.execute(
+            select(Alert.threat_level, func.count(Alert.id))
+            .where(Alert.created_at >= since)
+            .group_by(Alert.threat_level)
+        )
     ).all()
     threat_level_distribution = [{"level": int(level), "count": count} for level, count in level_rows]
 
@@ -114,7 +139,10 @@ async def get_timeline(
     sessions = (
         await db.execute(
             select(SessionLog.start_time)
-            .where(SessionLog.start_time >= since)
+            .where(
+                SessionLog.start_time >= since,
+                SessionLog.honeypot.in_(REAL_HONEYPOT_TYPES),
+            )
         )
     ).scalars().all()
 
@@ -133,8 +161,6 @@ async def get_top_attackers(
     """Return top 10 attackers by session count in the last 24 hours."""
     since = datetime.now(CAIRO_TZ).replace(tzinfo=None) - timedelta(hours=24)
 
-    from models import AttackerProfile
-
     rows = (
         await db.execute(
             select(
@@ -144,7 +170,10 @@ async def get_top_attackers(
                 func.max(AttackerProfile.country).label("country"),
             )
             .join(AttackerProfile, AttackerProfile.ip == SessionLog.attacker_ip)
-            .where(SessionLog.start_time >= since)
+            .where(
+                SessionLog.start_time >= since,
+                SessionLog.honeypot.in_(REAL_HONEYPOT_TYPES),
+            )
             .group_by(SessionLog.attacker_ip)
             .order_by(func.count(SessionLog.id).desc())
             .limit(10)
@@ -168,8 +197,6 @@ async def get_vpn_users(
     _current_user: User = Depends(get_current_user),
 ) -> list[dict]:
     since = datetime.now(CAIRO_TZ).replace(tzinfo=None) - timedelta(hours=24)
-
-    from models import AttackerProfile
 
     rows = (
         await db.execute(
@@ -201,7 +228,7 @@ async def get_vpn_users(
             "isp": row.isp or "",
             "session_count": row.session_count,
             "threat_level": row.threat_level or 0,
-            "last_seen": row.last_seen.isoformat() if row.last_seen else None,
+            "last_seen": cairo_iso(row.last_seen) if row.last_seen else None,
         }
         for row in rows
     ]

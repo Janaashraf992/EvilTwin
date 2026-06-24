@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import CAIRO_TZ, cairo_iso
+from config import CAIRO_TZ, REAL_HONEYPOT_TYPES, cairo_iso
 from database import get_db
 from deps import get_current_user
 from models import SessionLog, User
@@ -56,6 +56,7 @@ async def splunk_startup_sync(db: AsyncSession) -> int:
         return 0
     result = await db.execute(
         select(SessionLog)
+        .where(SessionLog.honeypot.in_(REAL_HONEYPOT_TYPES))
         .order_by(SessionLog.start_time.asc())
         .limit(MAX_BATCH)
     )
@@ -81,6 +82,7 @@ async def splunk_sync(
     if all or hours <= 0:
         result = await db.execute(
             select(SessionLog)
+            .where(SessionLog.honeypot.in_(REAL_HONEYPOT_TYPES))
             .order_by(SessionLog.start_time.asc())
             .limit(MAX_BATCH)
         )
@@ -88,7 +90,10 @@ async def splunk_sync(
         since = datetime.now(CAIRO_TZ).replace(tzinfo=None) - timedelta(hours=hours)
         result = await db.execute(
             select(SessionLog)
-            .where(SessionLog.start_time >= since)
+            .where(
+                SessionLog.honeypot.in_(REAL_HONEYPOT_TYPES),
+                SessionLog.start_time >= since,
+            )
             .order_by(SessionLog.start_time.asc())
             .limit(MAX_BATCH)
         )

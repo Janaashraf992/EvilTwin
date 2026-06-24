@@ -15,19 +15,35 @@
   --color-tooltip-border: rgba(255,255,255,0.07);
   --color-tooltip-text: #E8EAF0;
   --color-gauge-bg: #141928;
+  --color-chart-axis: #6B7280;
+  --color-map-ocean: rgb(16, 32, 64);
+  --color-map-tooltip-bg: rgba(10, 14, 26, 0.95);
+  --color-map-tooltip-border: rgba(255, 255, 255, 0.1);
+  --color-map-tooltip-heading: #e2e8f0;
+  --color-map-tooltip-text: #f8fafc;
+  --color-map-tooltip-muted: #94a3b8;
+  --color-map-tooltip-dim: #64748b;
 }
 
 .light {
-  --color-base: 240 244 248;
+  --color-base: 237 240 250;
   --color-surface: 255 255 255;
-  --color-elevated: 226 232 240;
+  --color-elevated: 228 232 246;
   --color-text-primary: 30 41 59;
-  --color-text-muted: 100 116 139;
-  --color-border: 0 0 0;
+  --color-text-muted: 71 85 105;
+  --color-border: 100 116 139;
   --color-tooltip-bg: #FFFFFF;
   --color-tooltip-border: rgba(0,0,0,0.1);
   --color-tooltip-text: #1E293B;
-  --color-gauge-bg: #E2E8F0;
+  --color-gauge-bg: #E4E9F7;
+  --color-chart-axis: #475569;
+  --color-map-ocean: #d3e1f3;
+  --color-map-tooltip-bg: rgba(255, 255, 255, 0.97);
+  --color-map-tooltip-border: rgba(15, 23, 42, 0.12);
+  --color-map-tooltip-heading: #0f172a;
+  --color-map-tooltip-text: #0f172a;
+  --color-map-tooltip-muted: #475569;
+  --color-map-tooltip-dim: #64748b;
 }
 
 @layer base {
@@ -39,7 +55,10 @@
   }
 
   .light body {
-    background: radial-gradient(circle at top right, #E8EDF2 0%, #F0F4F8 100%);
+    background:
+      radial-gradient(circle at top right, rgba(199, 210, 254, 0.55) 0%, rgba(199, 210, 254, 0) 45%),
+      radial-gradient(circle at bottom left, rgba(165, 180, 252, 0.35) 0%, rgba(165, 180, 252, 0) 40%),
+      linear-gradient(135deg, #eef2fe 0%, #e9edfb 45%, #f3f0fb 100%);
     background-attachment: fixed;
   }
 
@@ -74,7 +93,11 @@
   }
 
   .light .glass {
-    box-shadow: 0 16px 48px -12px rgba(0, 0, 0, 0.15);
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(238, 242, 252, 0.86));
+    border-color: rgba(99, 102, 241, 0.14);
+    box-shadow:
+      0 16px 40px -16px rgba(79, 70, 229, 0.28),
+      0 2px 8px -2px rgba(30, 41, 59, 0.08);
   }
 
   .input-theme {
@@ -87,8 +110,11 @@
   }
 
   .light .glass-elevated {
-    background: rgb(var(--color-elevated) / 0.95);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(232, 237, 250, 0.9));
+    border-color: rgba(99, 102, 241, 0.18);
+    box-shadow:
+      0 18px 44px -18px rgba(79, 70, 229, 0.32),
+      0 2px 10px -3px rgba(30, 41, 59, 0.1);
   }
 
   .mono {
@@ -105,6 +131,12 @@
       linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
     background-size: 40px 40px;
     background-position: center center;
+  }
+
+  .light .grid-line {
+    background-image:
+      linear-gradient(rgba(79, 70, 229, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(79, 70, 229, 0.06) 1px, transparent 1px);
   }
 
   .threat-critical { @apply bg-threat/10 text-threat border-threat/40 shadow-[0_0_15px_rgba(230,57,70,0.15)]; }

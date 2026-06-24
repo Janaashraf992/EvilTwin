@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Outlook Web App</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f3f2f1;
+            min-height: 100vh;
+        }
+        .header {
+            background: #0078d4;
+            color: white;
+            padding: 12px 24px;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        .container {
+            max-width: 440px;
+            margin: 60px auto;
+            padding: 0 20px;
+        }
+        .card {
+            background: white;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+            padding: 44px;
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo img { width: 200px; height: auto; }
+        .logo h2 { color: #333; font-weight: 400; margin-top: 8px; font-size: 22px; }
+        label { display: block; font-size: 13px; color: #333; margin-bottom: 4px; }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+            margin-bottom: 16px;
+            border-radius: 2px;
+        }
+        input:focus { border-color: #0078d4; outline: none; box-shadow: 0 0 0 2px rgba(0,120,212,0.2); }
+        .btn {
+            width: 100%;
+            padding: 10px;
+            background: #0078d4;
+            color: white;
+            border: none;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 2px;
+        }
+        .btn:hover { background: #106ebe; }
+        .footer {
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            margin-top: 20px;
+        }
+        .footer a { color: #0078d4; text-decoration: none; }
+        .remember { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="header">Outlook</div>
+    <div class="container">
+        <div class="card">
+            <div class="logo">
+                <svg width="200" height="48" viewBox="0 0 200 48"><rect width="48" height="48" rx="4" fill="#0078d4"/><text x="24" y="32" text-anchor="middle" fill="white" font-size="28" font-weight="bold">O</text><text x="60" y="32" fill="#0078d4" font-size="20" font-weight="600">Outlook</text></svg>
+                <h2>Sign in</h2>
+            </div>
+            <form method="post" action="/owa/auth.owa">
+                <label>Email</label>
+                <input type="text" name="username" placeholder="user@company.com" autocomplete="off">
+                <label>Password</label>
+                <input type="password" name="password" placeholder="Password" autocomplete="off">
+                <div class="remember">
+                    <input type="checkbox" id="keep" name="keep" value="1" checked>
+                    <label for="keep" style="margin-bottom:0">Keep me signed in</label>
+                </div>
+                <button class="btn" type="submit">Sign in</button>
+            </form>
+        </div>
+        <div class="footer">
+            <a href="#">Can't access your account?</a><br>
+            &copy; 2026 Microsoft &middot; Corporate Portal
+        </div>
+    </div>
+</body>
+</html>

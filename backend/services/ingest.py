@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from datetime import datetime
 
-from fastapi import HTTPException
+from sqlalchemy import cast, func, select
+from sqlalchemy.dialects.postgresql import INET as PG_INET
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import CAIRO_TZ, cairo_iso
-
-from ip_utils import is_private_or_reserved
+from config import CAIRO_TZ, cairo_iso, get_settings
 from models import Alert, AttackerProfile, SessionLog
 from schemas import LogIngestRequest, LogIngestResponse
+from services.canary import match_bait_token, trigger_canary
 from state import AppState, app_state
+
+logger = logging.getLogger(__name__)
 
 
 def session_uuid(src_ip: str, session: str) -> uuid.UUID:
@@ -35,12 +38,12 @@ async def ingest_event(
     started = time.perf_counter()
     src_ip = str(payload.src_ip)
 
-    if is_private_or_reserved(src_ip):
-        raise HTTPException(status_code=422, detail=f"Rejected private/reserved IP: {src_ip}")
-
     current_session_id = session_uuid(src_ip, payload.session)
 
-    profile = await db.get(AttackerProfile, src_ip)
+    result = await db.execute(
+        select(AttackerProfile).where(AttackerProfile.ip == cast(src_ip, PG_INET))
+    )
+    profile = result.scalar_one_or_none()
     now = datetime.now(CAIRO_TZ).replace(tzinfo=None)
     if profile is None:
         profile = AttackerProfile(
@@ -52,6 +55,7 @@ async def ingest_event(
         db.add(profile)
     else:
         profile.last_seen = now
+        profile.total_sessions = (profile.total_sessions or 0) + 1
 
     session = await db.get(SessionLog, current_session_id)
     if session is None:
@@ -93,6 +97,24 @@ async def ingest_event(
     existing_events.append(payload.model_dump(mode="json"))
     session.raw_log = {"events": existing_events}
 
+    # Honeypot-side canary detection: if the attacker touched a planted bait
+    # file (Cowrie command or Dionaea FTP/HTTP request) fire the mapped token.
+    detect_text = " ".join(part for part in (payload.input, payload.message) if part)
+    bait_token = match_bait_token(detect_text, session.honeypot)
+    if bait_token:
+        await trigger_canary(
+            db,
+            bait_token,
+            src_ip,
+            timestamp=payload.timestamp,
+            session=session,
+            profile=profile,
+            source=session.honeypot,
+            runtime_state=runtime_state,
+            cooldown_key=f"{src_ip}:{bait_token}",
+            cooldown_seconds=get_settings().CANARY_INGEST_COOLDOWN_SECONDS,
+        )
+
     if runtime_state.vpn_detector:
         vpn = await runtime_state.vpn_detector.check(src_ip)
         profile.vpn_detected = vpn.vpn or vpn.proxy or vpn.tor
@@ -108,8 +130,7 @@ async def ingest_event(
 
     multi_protocol = False
     if profile.total_sessions and profile.total_sessions > 1:
-        from sqlalchemy import func, select
-        stmt = select(func.count(func.distinct(SessionLog.protocol))).where(SessionLog.attacker_ip == src_ip)
+        stmt = select(func.count(func.distinct(SessionLog.protocol))).where(SessionLog.attacker_ip == cast(src_ip, PG_INET))
         res = await db.execute(stmt)
         distinct_protocols = res.scalar() or 1
         multi_protocol = distinct_protocols > 1
@@ -149,6 +170,7 @@ async def ingest_event(
 
     # Forward every event to Splunk regardless of threat level
     if runtime_state.splunk_forwarder:
+        logger.debug("Forwarding to Splunk: %s", src_ip)
         event_data = {
             "session_id": str(session.id),
             "attacker_ip": src_ip,
@@ -162,9 +184,11 @@ async def ingest_event(
             event_data,
             source=f"eviltwin-{session.honeypot}",
         )
+    else:
+        logger.debug("Splunk forwarder not available – skipping forward for %s", src_ip)
 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
     if elapsed_ms > 2000:
-        raise HTTPException(status_code=500, detail="Ingestion too slow")
+        logger.warning("Ingestion slow: %.0fms for %s", elapsed_ms, src_ip)
 
     return LogIngestResponse(session_id=session.id, threat_score=score, threat_level=level)

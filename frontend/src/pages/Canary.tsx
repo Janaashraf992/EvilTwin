@@ -97,9 +97,9 @@ function TokenRow({ token }: { token: CanaryToken }) {
           )}
           <div className="mt-2 flex items-center gap-1">
             <code className="flex-1 truncate rounded bg-black/40 px-2 py-1 text-[11px] font-mono text-white/50">
-              {token.webhook_url}?token_id={token.id}
+              {token.webhook_url}{token.webhook_url?.includes('?') ? '&' : '?'}token_id={token.id}
             </code>
-            <CopyButton text={`${token.webhook_url}?token_id=${token.id}`} />
+            <CopyButton text={`${token.webhook_url}${token.webhook_url?.includes('?') ? '&' : '?'}token_id=${token.id}`} />
           </div>
         </div>
 

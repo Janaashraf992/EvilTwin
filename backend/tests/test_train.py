@@ -3,7 +3,7 @@ from ai.train import generate_synthetic_data
 
 def test_generate_synthetic_data_distribution():
     X, y = generate_synthetic_data(seed=42)
-    assert X.shape == (2000, 16)
+    assert X.shape == (2000, 21)
     assert y.shape == (2000,)
     counts = {cls: int((y == cls).sum()) for cls in range(5)}
     assert counts[0] == 400

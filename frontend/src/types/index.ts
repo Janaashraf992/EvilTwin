@@ -63,6 +63,7 @@ export interface DashboardStats {
   unique_attackers_24h: number;
   critical_alerts_24h: number;
   canary_triggers_24h: number;
+  vpn_users_count: number;
   honeypot_breakdown: Array<{ honeypot: string; count: number }>;
   top_commands: Array<{ command: string; count: number }>;
   attacks_by_hour: Array<{ hour: number; count: number }>;

@@ -322,3 +322,109 @@ if len(payload.auth_methods_used) >= 2 and payload.auth_attempts_count >= 3:
 **However**, in this system's context (detecting attackers hitting **honeypot** servers), the rule is intentionally aggressive. The safety net is at line 502 — if **ML** says "real" with ≥ 0.85 confidence, it **overrides** the heuristic, so well-behaved legitimate traffic with multi-method auth can still be rescued by the ML model.
 
 The question is: are you seeing this rule misclassify traffic you believe is legitimate?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+═══════════════════════════════════════════════════════════════════════════
+                    ATTACKER (decision = "honeypot")
+═══════════════════════════════════════════════════════════════════════════
+
+Gateway decides "honeypot" for 10.0.1.10
+    │
+    ├─ set_decision("honeypot")       → SSH proxy → 10.0.2.10 (Cowrie)
+    └─ POST /sdns/flows               → Ryu installs OpenFlow rules
+       {"ip":"10.0.1.10",                  │
+        "target":"honeypot"}               ▼
+                                     ┌──────────────────────────┐
+                                     │ INGRESS FLOW             │
+                                     │ Match: src=10.0.1.10     │
+                                     │ Action: SET dst=10.0.2.10│
+                                     │ Output: port 3 (honeypot)│
+                                     ├──────────────────────────┤
+                                     │ EGRESS FLOW              │
+                                     │ Match: src=10.0.2.10     │
+                                     │        dst=10.0.1.10     │
+                                     │ Action: Output port 1    │
+                                     └──────────────────────────┘
+                                              │
+                                              ▼
+                                     ALL traffic from 10.0.1.10:
+                                     → HTTP → 10.0.2.10 (Dionaea)
+                                     → FTP  → 10.0.2.10 (Dionaea)
+                                     → SMB  → 10.0.2.10 (Dionaea)
+                                     → MSSQL→ 10.0.2.10 (Dionaea)
+                                     → ANY  → 10.0.2.10
+
+
+═══════════════════════════════════════════════════════════════════════════
+                    NORMAL USER (decision = "real")
+═══════════════════════════════════════════════════════════════════════════
+
+Gateway decides "real" for 10.0.1.20
+    │
+    ├─ set_decision("real")           → SSH proxy → 10.0.1.100 (dummy banner)
+    └─ POST /sdns/flows               → Ryu installs OpenFlow rules
+       {"ip":"10.0.1.20",                  │
+        "target":"real"}                    ▼
+                                     ┌──────────────────────────┐
+                                     │ INGRESS FLOW             │
+                                     │ Match: src=10.0.1.20     │
+                                     │ Action: SET dst=10.0.1.100│
+                                     │ Output: port 5 (real)     │
+                                     ├──────────────────────────┤
+                                     │ EGRESS FLOW              │
+                                     │ Match: src=10.0.1.100    │
+                                     │        dst=10.0.1.20     │
+                                     │ Action: Output port 2    │
+                                     └──────────────────────────┘
+                                              │
+                                              ▼
+                                     ALL traffic from 10.0.1.20:
+                                     → HTTP → 10.0.1.100 ("You are normal")
+                                     → FTP  → 10.0.1.100 (real banner)
+                                     → ANY  → 10.0.1.100
+
+                                     SSH terminal shows:
+                                     "Welcome to Ubuntu 22.04.2 LTS"
+                                     "You are authenticated as a legitimate user"
+                                     user@real-server:~$ _
+
+
+═══════════════════════════════════════════════════════════════════════════
+                    SIDE-BY-SIDE
+═══════════════════════════════════════════════════════════════════════════
+
+  ATTACKER 10.0.1.10                   NORMAL USER 10.0.1.20
+  ─────────────────────                ────────────────────────
+  SSH:    Cowrie (fake shell)          SSH:    Dummy banner (welcome msg)
+  HTTP:   Dionaea traps request        HTTP:   "You are normal user" page
+  FTP:    Dionaea captures creds       FTP:    Real banner / nothing
+  SMB:    Dionaea decoy                SMB:    Real banner / nothing
+  MSSQL:  Dionaea honey db             MSSQL:  Real banner / nothing
+
+  ALL commands logged to DB            NOTHING logged (session deleted)
+  ML scores threat level               Zero trace preserved
+  Profile: total_sessions += 1         Profile: deleted (total_sessions=0)
+  Next reconnect: pre-gate honeypot    Next reconnect: fresh evaluation
+
+  SAME GATEWAY. SAME PROCESS. DIFFERENT DESTINATIONS.
+  ONE OPENFLOW RULE PER IP. ATTACKER CANNOT TELL THE DIFFERENCE.

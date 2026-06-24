@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from jose import jwt, JWTError
 
 from config import get_settings
@@ -12,8 +12,17 @@ settings = get_settings()
 
 
 @router.websocket("/ws/alerts")
-async def websocket_alerts(websocket: WebSocket, token: str = Query(default=None)) -> None:
-    # Validate JWT token from query param for WebSocket auth
+async def websocket_alerts(websocket: WebSocket) -> None:
+    await websocket.accept()
+
+    # Receive token as first message (not in URL query param)
+    try:
+        first_msg = await websocket.receive_text()
+        token = first_msg.strip()
+    except Exception:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -26,7 +35,6 @@ async def websocket_alerts(websocket: WebSocket, token: str = Query(default=None
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    await websocket.accept()
     client_id = str(uuid.uuid4())
     queue = await app_state.alert_manager.connect(client_id)
 
@@ -35,7 +43,8 @@ async def websocket_alerts(websocket: WebSocket, token: str = Query(default=None
             message = await queue.get()
             await websocket.send_json(message)
     except WebSocketDisconnect:
-        app_state.alert_manager.disconnect(client_id)
+        pass
     except Exception:
+        pass
+    finally:
         app_state.alert_manager.disconnect(client_id)
-        await websocket.close()

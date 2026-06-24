@@ -15,6 +15,7 @@ export const MOCK_STATS: DashboardStats = {
   unique_attackers_24h: 189,
   critical_alerts_24h: 24,
   canary_triggers_24h: 3,
+  vpn_users_count: 7,
   honeypot_breakdown: [
     { honeypot: "cowrie", count: 210 },
     { honeypot: "dionaea", count: 129 },

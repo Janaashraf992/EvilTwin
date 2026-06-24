@@ -178,34 +178,44 @@ class Handler(BaseHTTPRequestHandler):
 
         self._send_json(404, {"error": "not found"})
 
-    def do_POST(self):
+    def _parse_qs(self):
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(self.path)
+        return parse_qs(parsed.query)
+
+    def _handle_hec_post(self):
         global _request_count, _error_count
         _request_count += 1
 
-        if self.path != "/services/collector/event":
-            self._send_json(404, {"text": "Not found", "code": 1})
-            return
+        path = self.path.split("?")[0]
 
         auth = self.headers.get("Authorization", "")
         expected = f"Splunk {HEC_TOKEN}"
         if auth != expected:
             _error_count += 1
             self._send_json(403, {"text": "Invalid token", "code": 1})
-            return
+            return True
 
         try:
             length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length)
-            payload = json.loads(raw)
+            body_raw = self.rfile.read(length)
+            body = json.loads(body_raw)
         except Exception:
             _error_count += 1
             self._send_json(400, {"text": "Invalid JSON", "code": 1})
-            return
+            return True
 
-        event = payload.get("event", payload)
-        source = payload.get("source", "unknown")
-        sourcetype = payload.get("sourcetype", "unknown")
-        index = payload.get("index", "main")
+        if path == "/services/collector/raw":
+            qs = self._parse_qs()
+            source = qs.get("source", ["unknown"])[0]
+            sourcetype = qs.get("sourcetype", ["unknown"])[0]
+            index = qs.get("index", ["main"])[0]
+            event = body if isinstance(body, dict) else {"raw": body_raw}
+        else:
+            event = body.get("event", body)
+            source = body.get("source", "unknown")
+            sourcetype = body.get("sourcetype", "unknown")
+            index = body.get("index", "main")
 
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -217,11 +227,23 @@ class Handler(BaseHTTPRequestHandler):
 
         with _lock:
             _events.append(record)
+            if len(_events) > 5000:
+                del _events[:-5000]
 
         if len(_events) % 10 == 0:
             _save_events()
 
         self._send_json(200, {"text": "Success", "code": 0})
+        return True
+
+    def do_POST(self):
+        path = self.path.split("?")[0]
+        if path in ("/services/collector/event", "/services/collector/raw"):
+            self._handle_hec_post()
+        else:
+            global _request_count
+            _request_count += 1
+            self._send_json(404, {"text": "Not found", "code": 1})
 
 
 def main():

@@ -1,10 +1,13 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from functools import lru_cache
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-CAIRO_TZ = timezone(timedelta(hours=2))
+CAIRO_TZ = ZoneInfo("Africa/Cairo")
+
+REAL_HONEYPOT_TYPES = ("cowrie", "dionaea", "canary")
 
 
 def cairo_iso(dt: datetime | None) -> str:
@@ -41,6 +44,11 @@ class Settings(BaseSettings):
 
     CANARY_WEBHOOK_SECRET: str = ""
     CANARY_WEBHOOK_TOLERANCE_SECONDS: int = 300
+    # Optional JSON override for honeypot-side bait detection: {"substring": "token-uuid"}.
+    # Empty string uses the built-in patterns in services/canary.py.
+    CANARY_BAIT_MAP: str = ""
+    # Suppress duplicate canary alerts for the same (ip, token) within this window.
+    CANARY_INGEST_COOLDOWN_SECONDS: int = 30
 
     SECRET_KEY: str = "change-me-in-production"
     ALGORITHM: str = "HS256"
@@ -57,6 +65,7 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.2
 
     VITE_API_BASE_URL: str = "http://localhost:8000"
+    BACKEND_URL: str = "http://localhost:8000"
     VITE_WS_URL: str = "ws://localhost:8000/ws/alerts"
 
     BACKEND_HOST: str = "0.0.0.0"

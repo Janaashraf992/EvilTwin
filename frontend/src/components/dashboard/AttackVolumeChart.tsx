@@ -7,8 +7,8 @@ export function AttackVolumeChart({ data }: { data: Array<{ hour: number; count:
       <div className="h-64 w-full">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-            <XAxis dataKey="hour" stroke="#6B7280" tick={{ fill: '#6B7280', fontSize: 12 }} tickMargin={10} />
-            <YAxis stroke="#6B7280" tick={{ fill: '#6B7280', fontSize: 12 }} />
+            <XAxis dataKey="hour" stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 12 }} tickMargin={10} />
+            <YAxis stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 12 }} />
             <Tooltip 
               contentStyle={{ backgroundColor: 'var(--color-tooltip-bg, #0F1424)', borderColor: 'var(--color-tooltip-border, rgba(255,255,255,0.07))', color: 'var(--color-tooltip-text, #E8EAF0)' }}
               itemStyle={{ color: '#2EC4B6' }}
