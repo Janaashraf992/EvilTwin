@@ -226,6 +226,38 @@ _CANARY_TOKENS = [
         "difficulty": 4,
         "score_value": 0.60,
     },
+    {
+        "id": "a1b2c3d4-e5f6-4071-8293-a4b5c6d7e8f9",
+        "label": "Prod DB dump in /var/backups (SSH)",
+        "description": "prod_db_dump.sql planted in /var/backups/db/ inside the Cowrie SSH honeypot (port 2222).",
+        "token_kind": "file",
+        "difficulty": 3,
+        "score_value": 0.40,
+    },
+    {
+        "id": "c3f1a2b4-5d6e-4f80-9a1b-2c3d4e5f6071",
+        "label": "AWS credentials in ~/.aws (SSH)",
+        "description": "AWS key id/secret at /home/deploy/.aws/credentials (Cowrie SSH honeypot 2222).",
+        "token_kind": "aws_key",
+        "difficulty": 3,
+        "score_value": 0.40,
+    },
+    {
+        "id": "d4e2b3c5-6e7f-4a91-8b2c-3d4e5f607182",
+        "label": "App secrets in /opt/app/.env (SSH)",
+        "description": "App .env with DB/JWT/Stripe/SMTP secrets at /opt/app/.env (Cowrie SSH honeypot 2222).",
+        "token_kind": "file",
+        "difficulty": 3,
+        "score_value": 0.40,
+    },
+    {
+        "id": "b7c8d9e0-1f23-4a56-8b9c-0d1e2f3a4b5c",
+        "label": "Shell history breadcrumb (~/.bash_history) (SSH)",
+        "description": "/root/.bash_history pointing at the scattered baits; early recon tripwire (Cowrie SSH 2222).",
+        "token_kind": "file",
+        "difficulty": 1,
+        "score_value": 0.15,
+    },
 ]
 
 

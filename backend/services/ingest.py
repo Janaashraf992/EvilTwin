@@ -13,6 +13,7 @@ from config import CAIRO_TZ, cairo_iso, get_settings
 from models import Alert, AttackerProfile, SessionLog
 from schemas import LogIngestRequest, LogIngestResponse
 from services.canary import match_bait_token, trigger_canary
+from services.ip_correlation import resolve_for_connect, resolve_for_session
 from state import AppState, app_state
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,17 @@ async def ingest_event(
 ) -> LogIngestResponse:
     started = time.perf_counter()
     src_ip = str(payload.src_ip)
+
+    # Un-mask SSH-gateway-proxied sessions: the gateway re-originates the
+    # attacker's connection to Cowrie, so payload.src_ip is the gateway. The
+    # connect event carries the gateway's outbound port (src_port); use it to
+    # recover the real client IP and remember it for the rest of the session.
+    if payload.eventid.endswith("session.connect") and payload.src_port:
+        real_ip = resolve_for_connect(payload.src_port, payload.session)
+    else:
+        real_ip = resolve_for_session(payload.session)
+    if real_ip:
+        src_ip = real_ip
 
     current_session_id = session_uuid(src_ip, payload.session)
 

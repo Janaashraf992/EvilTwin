@@ -199,9 +199,8 @@ services:
       VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:8000/ws/alerts}
     networks:
       - eviltwin-net
-    # Admin dashboard — intentionally NOT published to any host port.
-    # Reachable only via the nginx reverse proxy on the internal network
-    # (upstream frontend -> frontend:3000). Hidden from all port scans.
+    ports:
+      - "3000:3000"
     restart: unless-stopped
     depends_on:
       backend:

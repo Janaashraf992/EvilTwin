@@ -16,6 +16,8 @@ import time
 
 from fastapi import APIRouter, Header, HTTPException
 
+from services.ip_correlation import PROXY_MAP_TTL, register_proxy_mapping
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/routing", tags=["routing"])
@@ -126,6 +128,23 @@ async def set_routing(data: dict, _key: str = Header("", alias="X-Routing-Key"))
         _save_to_file()
     _dirty = False
     return {"status": "ok", "ip": ip, "target": target, "target_ip": target_ip}
+
+
+@router.post("/proxy-map")
+async def set_proxy_map(data: dict, _key: str = Header("", alias="X-Routing-Key")) -> dict:
+    """Register that the SSH gateway's outbound port maps to a real attacker IP.
+
+    The gateway proxies SSH to Cowrie, so Cowrie logs the gateway IP. Cowrie
+    records the gateway's outbound port as ``src_port`` on its connect event;
+    ingestion uses this mapping to attribute the session to the real client."""
+    _check_auth(_key)
+    proxy_port = data.get("proxy_port")
+    real_ip = (data.get("real_ip") or "").strip()
+    if not proxy_port or not real_ip:
+        return {"status": "error", "detail": "missing proxy_port or real_ip"}
+    ttl = int(data.get("ttl") or PROXY_MAP_TTL)
+    register_proxy_mapping(int(proxy_port), real_ip, ttl)
+    return {"status": "ok", "proxy_port": int(proxy_port), "real_ip": real_ip}
 
 
 @router.get("/decision/{ip}")

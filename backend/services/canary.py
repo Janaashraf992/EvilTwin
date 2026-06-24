@@ -48,8 +48,12 @@ def default_score_value(difficulty: int) -> float:
 # ``TRIPWIRE_TOKEN_MAP`` instead — they are intentionally NOT in this map.
 # ---------------------------------------------------------------------------
 _DEFAULT_BAIT_PATTERNS: list[tuple[str, str]] = [
-    ("database_backup.sql", "e8ca06a6-7123-4a08-9262-38c347248e51"),  # L4 Cowrie /tmp
-    ("id_rsa", "7aedcaf0-b627-4f6f-95e8-5e59d891147e"),  # L5 Cowrie /root/.ssh
+    ("database_backup.sql", "e8ca06a6-7123-4a08-9262-38c347248e51"),  # Cowrie /tmp staging dump
+    ("prod_db_dump.sql", "a1b2c3d4-e5f6-4071-8293-a4b5c6d7e8f9"),  # Cowrie /var/backups/db
+    (".aws/credentials", "c3f1a2b4-5d6e-4f80-9a1b-2c3d4e5f6071"),  # Cowrie /home/deploy/.aws
+    ("opt/app/.env", "d4e2b3c5-6e7f-4a91-8b2c-3d4e5f607182"),  # Cowrie /opt/app/.env
+    ("id_rsa", "7aedcaf0-b627-4f6f-95e8-5e59d891147e"),  # Cowrie /root/.ssh
+    (".bash_history", "b7c8d9e0-1f23-4a56-8b9c-0d1e2f3a4b5c"),  # Cowrie /root/.bash_history breadcrumb
     ("aws_credentials", "083ee719-79d9-4174-b471-076ecc4248d7"),  # L2 Dionaea FTP
     ("passwords.txt", "19eee70f-aefd-4afb-ab06-3598d374876b"),  # L1 Dionaea HTTP
 ]

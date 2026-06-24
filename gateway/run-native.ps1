@@ -27,7 +27,7 @@ $env:REAL_SSH_PASSWORD = if ($env:REAL_SSH_PASSWORD) { $env:REAL_SSH_PASSWORD } 
 $env:HONEYPOT_HOST     = if ($env:HONEYPOT_HOST)     { $env:HONEYPOT_HOST     } else { "127.0.0.1" }
 $env:HONEYPOT_PORT     = if ($env:HONEYPOT_PORT)     { $env:HONEYPOT_PORT     } else { "2222" }
 $env:GATEWAY_LISTEN_PORT = "22"
-$env:HOST_KEY_PATH     = Join-Path $PSScriptRoot "gateway" "ssh_host_rsa_key"
+$env:HOST_KEY_PATH     = Join-Path $PSScriptRoot "ssh_host_rsa_key"
 
 # ---------- firewall ----------
 Write-Host "Opening Windows Firewall port 22..." -ForegroundColor Yellow
@@ -58,5 +58,5 @@ Write-Host "Honeypot: $($env:HONEYPOT_HOST):$($env:HONEYPOT_PORT)" -ForegroundCo
 Write-Host "Listening on port 22..." -ForegroundColor Green
 Write-Host ""
 
-Set-Location (Join-Path $PSScriptRoot "gateway")
+Set-Location $PSScriptRoot
 python -u gateway.py

@@ -507,7 +507,7 @@ async def process_dionaea_log_line(
     db_factory: DbFactory = _default_db_factory,
     runtime_state: AppState = app_state,
     ingest_handler: IngestHandler = ingest_event,
-    _seen_sessions: set[str] | None = None,
+    _seen_events: set[str] | None = None,
 ) -> bool:
     import asyncio as _asyncio
     decoder = json.JSONDecoder()
@@ -530,14 +530,20 @@ async def process_dionaea_log_line(
         if not payloads:
             continue
 
-        # Skip duplicate ingestion on log rotation re-read
-        session_key = f"{payloads[0].src_ip}:{payloads[0].session}"
-        if _seen_sessions is not None:
-            if session_key in _seen_sessions:
+        # Skip duplicate ingestion on log rotation re-read. Dedup is per-event
+        # (keyed on the first payload that identifies this raw line) rather than
+        # per-session, so successive events on the same connection are kept.
+        first = payloads[0]
+        event_key = (
+            f"{first.src_ip}:{first.session}:{first.eventid}:"
+            f"{first.timestamp.isoformat()}:{first.input or ''}"
+        )
+        if _seen_events is not None:
+            if event_key in _seen_events:
                 continue
-            _seen_sessions.add(session_key)
-            if len(_seen_sessions) > 5000:
-                _seen_sessions.clear()
+            _seen_events.add(event_key)
+            if len(_seen_events) > 100_000:
+                _seen_events.clear()
 
         async with db_factory() as db:
             for payload in payloads:
@@ -563,7 +569,7 @@ async def watch_dionaea_log(
 ) -> None:
     path = Path(log_path)
     offset: int | None = None
-    seen_sessions: set[str] = set()
+    seen_events: set[str] = set()
     logger.info("Dionaea log watcher starting: %s", log_path)
     logger.setLevel(logging.INFO)  # Ensure visibility
 
@@ -596,7 +602,7 @@ async def watch_dionaea_log(
                         db_factory=db_factory,
                         runtime_state=runtime_state,
                         ingest_handler=ingest_handler,
-                        _seen_sessions=seen_sessions,
+                        _seen_events=seen_events,
                     )
         except asyncio.CancelledError:
             raise

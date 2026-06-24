@@ -18,13 +18,16 @@ import time
 
 STAGE = "/tmp/baits-honeyfs"
 
-# (vpath in fake fs, path relative to honeyfs/STAGE, octal mode)
+# (vpath in fake fs, path relative to honeyfs/STAGE, octal mode, age in days)
+# Baits are scattered across realistic locations (not piled in /root) and given
+# staggered ages so they don't all share an identical, freshly-planted ctime.
 BAITS = [
-    ("/tmp/database_backup.sql", "tmp/database_backup.sql", 0o644),
-    ("/root/.ssh/id_rsa", "root/.ssh/id_rsa", 0o600),
-    ("/root/credentials.txt", "root/credentials.txt", 0o600),
-    ("/root/aws_keys.csv", "root/aws_keys.csv", 0o600),
-    ("/root/backups/prod_db_dump.sql", "root/backups/prod_db_dump.sql", 0o644),
+    ("/tmp/database_backup.sql", "tmp/database_backup.sql", 0o644, 2),
+    ("/root/.ssh/id_rsa", "root/.ssh/id_rsa", 0o600, 420),
+    ("/root/.bash_history", "root/.bash_history", 0o600, 1),
+    ("/home/deploy/.aws/credentials", "home/deploy/.aws/credentials", 0o600, 95),
+    ("/opt/app/.env", "opt/app/.env", 0o640, 60),
+    ("/var/backups/db/prod_db_dump.sql", "var/backups/db/prod_db_dump.sql", 0o644, 7),
 ]
 
 # Cowrie fs.pickle record layout. Prefer the installed package constants;
@@ -71,19 +74,19 @@ def _find(entry, name):
     return None
 
 
-def _ensure_dir(parent, name):
+def _ensure_dir(parent, name, ctime):
     existing = _find(parent, name)
     if existing is not None and existing[A_TYPE] == T_DIR:
         return existing
-    entry = [name, T_DIR, 0, 0, 4096, 0o40755, int(time.time()), [], None, None]
+    entry = [name, T_DIR, 0, 0, 4096, 0o40755, ctime, [], None, None]
     _children(parent).append(entry)
     return entry
 
 
-def _add_file(parent, name, realfile, mode):
+def _add_file(parent, name, realfile, mode, ctime):
     parent[A_CONTENTS] = [c for c in _children(parent) if c[A_NAME] != name]
     size = os.path.getsize(realfile) if os.path.exists(realfile) else 0
-    entry = [name, T_FILE, 0, 0, size, 0o100000 | mode, int(time.time()), None, None, realfile]
+    entry = [name, T_FILE, 0, 0, size, 0o100000 | mode, ctime, None, None, realfile]
     parent[A_CONTENTS].append(entry)
 
 
@@ -100,7 +103,10 @@ def main():
     with open(fsp, "rb") as handle:
         root = pickle.load(handle)
 
-    for vpath, rel, mode in BAITS:
+    now = int(time.time())
+    dir_ctime = now - 500 * 86400  # parent dirs look long-established
+
+    for vpath, rel, mode, age_days in BAITS:
         src = os.path.join(STAGE, rel)
         dst = os.path.join(honeyfs, rel)
         if not os.path.exists(src):
@@ -110,12 +116,13 @@ def main():
         shutil.copyfile(src, dst)
         os.chmod(dst, mode)
 
+        file_ctime = now - age_days * 86400
         parts = [p for p in vpath.split("/") if p]
         node = root
         for directory in parts[:-1]:
-            node = _ensure_dir(node, directory)
-        _add_file(node, parts[-1], dst, mode)
-        print(f"[plant] {vpath} -> {dst} (mode {oct(mode)})", flush=True)
+            node = _ensure_dir(node, directory, dir_ctime)
+        _add_file(node, parts[-1], dst, mode, file_ctime)
+        print(f"[plant] {vpath} -> {dst} (mode {oct(mode)}, age {age_days}d)", flush=True)
 
     with open(fsp, "wb") as handle:
         pickle.dump(root, handle)

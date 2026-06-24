@@ -1,0 +1,13 @@
+# Never bake host-trained ML models into the image. They may have been
+# pickled with library versions that differ from requirements.txt, which
+# makes joblib.load fail at runtime. The entrypoint (docker-entrypoint.sh)
+# trains fresh models against the pinned deps when they are missing.
+ai/*.pkl
+ai/catboost_info/
+
+# Python caches / build noise
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/

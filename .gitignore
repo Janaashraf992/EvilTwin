@@ -91,6 +91,10 @@ docs-site/my_build_output.txt
 *.key
 *.cert
 *.crt
+ssh_host_*_key
+ssh_host_*_key.pub
+# Honeypot bait credentials are planted at runtime, never committed
+**/.aws/credentials
 # EXCEPTION: keep the example template
 !.env.example
 

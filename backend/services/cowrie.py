@@ -88,7 +88,7 @@ async def process_cowrie_log_line(
     db_factory: DbFactory = _default_db_factory,
     runtime_state: AppState = app_state,
     ingest_handler: IngestHandler = ingest_event,
-    _seen_sessions: set[str] | None = None,
+    _seen_events: set[str] | None = None,
 ) -> bool:
     try:
         raw_event = json.loads(line)
@@ -100,14 +100,20 @@ async def process_cowrie_log_line(
     if payload is None:
         return False
 
-    # Skip duplicate ingestion on log rotation re-read
-    session_key = f"{payload.src_ip}:{payload.session}"
-    if _seen_sessions is not None:
-        if session_key in _seen_sessions:
+    # Skip duplicate ingestion on log rotation re-read. Dedup must be per-event
+    # (not per-session): a single session emits many ordered events — the login
+    # attempts and every command.input line — so keying on the session alone
+    # would drop all but the first event and lose the attacker's commands.
+    event_key = (
+        f"{payload.src_ip}:{payload.session}:{payload.eventid}:"
+        f"{payload.timestamp.isoformat()}:{payload.input or ''}"
+    )
+    if _seen_events is not None:
+        if event_key in _seen_events:
             return True  # already processed — skip without error
-        _seen_sessions.add(session_key)
-        if len(_seen_sessions) > 5000:
-            _seen_sessions.clear()
+        _seen_events.add(event_key)
+        if len(_seen_events) > 100_000:
+            _seen_events.clear()
 
     async with db_factory() as db:
         await ingest_handler(payload, db, runtime_state)
@@ -126,7 +132,7 @@ async def watch_cowrie_log(
 ) -> None:
     path = Path(log_path)
     offset: int | None = None
-    seen_sessions: set[str] = set()
+    seen_events: set[str] = set()
 
     while True:
         try:
@@ -157,7 +163,7 @@ async def watch_cowrie_log(
                         db_factory=db_factory,
                         runtime_state=runtime_state,
                         ingest_handler=ingest_handler,
-                        _seen_sessions=seen_sessions,
+                        _seen_events=seen_events,
                     )
         except asyncio.CancelledError:
             raise

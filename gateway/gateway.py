@@ -210,6 +210,18 @@ class GatewaySession(asyncssh.SSHServerSession):
                     timeout=10.0,
                 )
                 self._ssh_conn = conn
+                # Tell the backend which outbound port we used so honeypot log
+                # ingestion can attribute this Cowrie session to the real client
+                # IP instead of the gateway's container IP.
+                try:
+                    sockname = conn.get_extra_info("sockname")
+                    local_port = sockname[1] if sockname and len(sockname) > 1 else 0
+                    if local_port and self._signals.src_ip:
+                        await self._server._report_proxy_map(
+                            int(local_port), self._signals.src_ip
+                        )
+                except Exception:
+                    pass
             except Exception as exc:
                 logger.error(
                     "Honeypot %s:%s unreachable: %s",
@@ -457,6 +469,23 @@ class GatewayServer(asyncssh.SSHServer):
                     timeout=aiohttp.ClientTimeout(total=3),
                 )
             logger.debug("Routing table updated: %s → %s", src_ip, decision)
+        except Exception:
+            pass
+
+    async def _report_proxy_map(self, proxy_port: int, real_ip: str) -> None:
+        backend_url = os.getenv("BACKEND_URL", "http://backend:8000")
+        routing_key = os.getenv("ROUTING_API_KEY", "").strip()
+        try:
+            import aiohttp
+            headers = {"X-Routing-Key": routing_key} if routing_key else {}
+            async with aiohttp.ClientSession() as session:
+                await session.post(
+                    f"{backend_url}/routing/proxy-map",
+                    json={"proxy_port": int(proxy_port), "real_ip": real_ip},
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=3),
+                )
+            logger.debug("Proxy map reported: port %s → %s", proxy_port, real_ip)
         except Exception:
             pass
 

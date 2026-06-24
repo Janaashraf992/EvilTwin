@@ -28,10 +28,28 @@ class ThreatScorer:
             try:
                 return joblib.load(self.model_path)
             except Exception as exc:
-                logger.warning("Failed to load model from %s: %s", self.model_path, exc)
-                return None
-        logger.warning("Model file not found at %s – all threat scores will be 0", self.model_path)
-        return None
+                logger.error(
+                    "Failed to load model from %s: %s – retraining a compatible model",
+                    self.model_path,
+                    exc,
+                )
+                return self._retrain()
+        logger.error("Model file not found at %s – training a new model", self.model_path)
+        return self._retrain()
+
+    def _retrain(self) -> Any:
+        try:
+            from ai.train import train_model
+
+            pipeline = train_model()
+            try:
+                joblib.dump(pipeline, self.model_path)
+            except Exception as dump_exc:
+                logger.warning("Could not persist retrained model to %s: %s", self.model_path, dump_exc)
+            return pipeline
+        except Exception as exc:
+            logger.error("Model retraining failed: %s – all threat scores will be 0", exc)
+            return None
 
     def _cache_key(self, ip_key: str, session: Any) -> str:
         session_id = str(getattr(session, "id", ""))
@@ -82,5 +100,5 @@ class ThreatScorer:
             known_bad_ip,
         )
 
-    async def close(self) -> None:
+    def close(self) -> None:
         self._executor.shutdown(wait=False)
