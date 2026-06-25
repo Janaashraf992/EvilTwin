@@ -212,6 +212,24 @@ async def _ingest_honeypot_creds(client_ip: str, post_data: dict) -> None:
         pass  # fire-and-forget — don't block the response
 
 
+async def _report_proxy_map(client_ip: str, proxy_port: int) -> None:
+    """Register that this gateway's outbound port maps to a real client IP
+    so the backend can resolve real IPs for proxied honeypot log events."""
+    if _is_bypass(client_ip) or not proxy_port:
+        return
+    headers = {"X-Routing-Key": ROUTING_API_KEY} if ROUTING_API_KEY else {}
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                f"{BACKEND_URL}/routing/proxy-map",
+                json={"proxy_port": int(proxy_port), "real_ip": client_ip},
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=3),
+            )
+    except Exception:
+        pass
+
+
 def _serve_honeypot_page() -> web.Response:
     return web.Response(
         body=HONEYPOT_HTML,

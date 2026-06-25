@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import INET as PG_INET
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import CAIRO_TZ, cairo_iso, get_settings
+from ip_utils import is_private_or_reserved
 from models import Alert, AttackerProfile, SessionLog
 from schemas import LogIngestRequest, LogIngestResponse
 from services.canary import match_bait_token, trigger_canary
@@ -19,8 +20,8 @@ from state import AppState, app_state
 logger = logging.getLogger(__name__)
 
 
-def session_uuid(src_ip: str, session: str) -> uuid.UUID:
-    return uuid.uuid5(uuid.NAMESPACE_URL, f"{src_ip}:{session}")
+def session_uuid(session: str) -> uuid.UUID:
+    return uuid.uuid5(uuid.NAMESPACE_URL, session)
 
 
 def parse_honeypot(eventid: str) -> str:
@@ -39,18 +40,30 @@ async def ingest_event(
     started = time.perf_counter()
     src_ip = str(payload.src_ip)
 
-    # Un-mask SSH-gateway-proxied sessions: the gateway re-originates the
-    # attacker's connection to Cowrie, so payload.src_ip is the gateway. The
-    # connect event carries the gateway's outbound port (src_port); use it to
+    # Un-mask gateway-proxied sessions: the gateway re-originates the
+    # attacker's connection to the honeypot, so payload.src_ip is the gateway.
+    # Connection events carry the gateway's outbound port (src_port); use it to
     # recover the real client IP and remember it for the rest of the session.
-    if payload.eventid.endswith("session.connect") and payload.src_port:
-        real_ip = resolve_for_connect(payload.src_port, payload.session)
+    # Cowrie:  cowrie.session.connect
+    # Dionaea: dionaea.connection.{tcp,udp,...}.accept
+    is_connect_event = (
+        payload.eventid.endswith("session.connect")
+        or (payload.eventid.startswith("dionaea.connection.") and payload.eventid.endswith(".accept"))
+    )
+    if is_connect_event and payload.src_port:
+        real_ip = await resolve_for_connect(payload.src_port, payload.session)
+        if not real_ip:
+            logger.warning(
+                "IP resolution FAILED for %s (src_port=%s session=%s) — "
+                "session will be attributed to gateway IP %s",
+                payload.eventid, payload.src_port, payload.session, src_ip,
+            )
     else:
         real_ip = resolve_for_session(payload.session)
     if real_ip:
         src_ip = real_ip
 
-    current_session_id = session_uuid(src_ip, payload.session)
+    current_session_id = session_uuid(payload.session)
 
     result = await db.execute(
         select(AttackerProfile).where(AttackerProfile.ip == cast(src_ip, PG_INET))
@@ -83,6 +96,14 @@ async def ingest_event(
             malware_hashes=[],
         )
         db.add(session)
+    elif str(session.attacker_ip) != src_ip:
+        existing_ip = str(session.attacker_ip)
+        if is_private_or_reserved(existing_ip) and not is_private_or_reserved(src_ip):
+            logger.info(
+                "Correcting session %s attacker_ip: %s -> %s (real IP resolved)",
+                current_session_id, existing_ip, src_ip,
+            )
+            session.attacker_ip = cast(src_ip, PG_INET)
     session.end_time = payload.timestamp.replace(tzinfo=None)
 
     if payload.input:

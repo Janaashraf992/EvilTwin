@@ -72,8 +72,10 @@ services:
     networks:
       - deception-net
       - honeypot-ingress
+    # Loopback-only: attackers must traverse the SSH gateway (real IP is
+    # preserved + un-masked there). The native gateway reaches it at 127.0.0.1:2222.
     ports:
-      - "2222:22"
+      - "127.0.0.1:2222:22"
     restart: unless-stopped
 
   # ============================================================================
@@ -91,10 +93,10 @@ services:
       - deception-net
       - honeypot-ingress
     ports:
-      - "${DIONAEA_FTP_PORT:-2121}:21"
-      - "${DIONAEA_HTTP_PORT:-8081}:80"
-      - "${DIONAEA_SMB_PORT:-1445}:445"
-      - "${DIONAEA_MSSQL_PORT:-11433}:1433"
+      - "127.0.0.1:${DIONAEA_FTP_PORT:-2121}:21"
+      - "127.0.0.1:${DIONAEA_HTTP_PORT:-8081}:80"
+      - "127.0.0.1:${DIONAEA_SMB_PORT:-1445}:445"
+      - "127.0.0.1:${DIONAEA_MSSQL_PORT:-11433}:1433"
     restart: unless-stopped
 
   # ============================================================================

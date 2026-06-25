@@ -105,7 +105,7 @@ async def process_cowrie_log_line(
     # attempts and every command.input line — so keying on the session alone
     # would drop all but the first event and lose the attacker's commands.
     event_key = (
-        f"{payload.src_ip}:{payload.session}:{payload.eventid}:"
+        f"{payload.session}:{payload.eventid}:"
         f"{payload.timestamp.isoformat()}:{payload.input or ''}"
     )
     if _seen_events is not None:

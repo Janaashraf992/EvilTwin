@@ -535,7 +535,7 @@ async def process_dionaea_log_line(
         # per-session, so successive events on the same connection are kept.
         first = payloads[0]
         event_key = (
-            f"{first.src_ip}:{first.session}:{first.eventid}:"
+            f"{first.session}:{first.eventid}:"
             f"{first.timestamp.isoformat()}:{first.input or ''}"
         )
         if _seen_events is not None:
